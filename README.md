@@ -37,6 +37,58 @@ bash pguard_smoke_test.sh 13553
 python3 bench_guard.py http://127.0.0.1:13553 8
 ```
 
+## 补丁的打法与生效机制
+
+补丁 = 一个可安装的 Python 包（`pguard_vllm/`），通过 vLLM 的 `vllm.general_plugins` entry point 生效，**不改 vLLM 源码、不改权重**。
+
+**方式 A：docker compose（推荐，零手工步骤）**
+
+compose 把 `./pguard_vllm` live-mount 到容器 `/opt/pguard_vllm`，服务启动时自动 `pip install --no-build-isolation --no-deps -e` 完成 entry point 注册——**改补丁代码无需重建镜像，重启容器即生效**：
+
+```bash
+docker compose --profile vllm-guard up -d
+```
+
+**方式 B：已有 vLLM 环境，手动安装补丁包**
+
+```bash
+pip install --no-build-isolation --no-deps -e ./pguard_vllm
+
+# 校验 entry point 已注册（应输出 pguard_vllm）
+python3 -c "from importlib.metadata import entry_points; \
+  print([e.name for e in entry_points(group='vllm.general_plugins')])"
+
+# 用自带 server 启动（自动设置 hf_overrides 与图模式三件套）
+export PGUARD_HEADS=PGuard-EMA-Qwen3.5-9B
+export PGUARD_ENFORCE_EAGER=0 PGUARD_CAPTURE_MODE=aux VLLM_USE_V2_MODEL_RUNNER=1
+python3 -m pguard_vllm.server --model /path/to/Qwen3.5-9B-FP8-dynamic \
+  --port 13553 --max-model-len 8192 --gpu-memory-utilization 0.90 --max-num-seqs 32
+```
+
+**方式 C：纯 `vllm serve`（最小侵入，适合已有部署）**
+
+```bash
+vllm serve /path/to/Qwen3.5-9B-FP8-dynamic \
+  --hf-overrides '{"architectures": ["Qwen3_5PGuardForConditionalGeneration"]}' \
+  --max-model-len 8192 --gpu-memory-utilization 0.90 --max-num-seqs 32
+```
+
+（前提同方式 B：补丁包已安装、环境变量已设置；建议先用方式 B 跑通再迁移。）
+
+**生效链路**（补丁是怎么"打"上的）：
+
+1. `pip install -e` 注册 entry point：`vllm.general_plugins → pguard_vllm.plugin:register`
+2. vLLM 每个进程 import 时执行 `register()`：向 `ModelRegistry` 注册 `Qwen3_5PGuardForConditionalGeneration`，并给 GPUModelRunner（legacy/V2 两个类）打 `execute_model` / `_model_forward` 运行时补丁
+3. `--hf-overrides` 把 `architectures` 换成补丁类 → vLLM 加载**原版**主干权重时实例化补丁类
+4. 补丁类 `load_weights` 后执行 `_setup_pguard()`：加载安全头 checkpoint、设置 20/24/28 层捕获（hooks 或 aux）、建槽位池与分数聚合缓冲
+5. 每个引擎步：`execute_model` 包装器在步后调用 `run_guard_step` → 分段打分 → 写 GuardStore（逐步记录 + final 记录）
+
+**换模型 / 换头 / 换版本**：
+
+- 换安全头：改 `PGUARD_HEADS` 指向对应 checkpoint 目录（支持 lasttok / ema / gru，可多头同开）
+- 换主干：`hidden_size` 与层数匹配即可；捕获层用 `PGUARD_CAPTURE_LAYERS` 覆盖
+- 换 vLLM 版本：核对 `patch_runner.py` 里两个 runner 类的模块路径与 `execute_model` / `_model_forward` 结构（0.25.1 已验证；其他版本按规划文档 §11 R1 的方法重新核实）
+
 ## API 用法
 
 ### 生成 + 打分（混合模式）
