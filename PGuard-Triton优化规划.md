@@ -149,16 +149,15 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 - **分数扁平化**：打分记录从"任务→token→类别"三层嵌套改为**任务主序扁平向量 + (start,stop) 类偏移表**（官方 `interrupt_policy.py` HeadRules 同款）——引擎侧零额外 GPU 操作（`torch.cat` 天然任务主序），store/API 按 `flat_to_rows` 切片；JSON 体积更小、解析更快，也为 GPU 聚合与 mmap 存储定了布局。注意：vLLM 0.25.1 的异步请求路径会给请求 id 追加后缀，store 的前缀 glob 兜底必须保留（曾误删导致 503，已恢复）。
 - **GPU 聚合前置（R2）**：`StatePool` 增加每槽 `acc_last_p/acc_last_d/acc_max_d` 聚合缓冲，每步打分后一个 kernel 链完成 running max/last 更新；请求结束（`finished_req_ids`）时一次 D2H 写入 **final 记录**，`pop()` 优先读 final（**O(1)**），series 仍可从逐步行重建。已验证：final 与逐行聚合结果一致，图模式下 bench 350.5 tok/s、0 失败。
 
-**下一步**：
-1. **聚合前置**：引擎侧用 `torch.maximum` 在 GPU 上维护每 (head, req) 的 response 运行最大值 + last 向量（一个 kernel/步），非中断请求只在结束时写一条 final 记录；`PGUARD_STORE_PERSTEP=1` 时才逐步写 slim 行（流式中断用）。文件量从 O(steps) 降到 O(1)。
-2. **共享内存槽位协议**：/dev/shm 固定布局 `[max_req][tasks][classes]` + 版本号的 mmap 存储，替代 JSONL 的 open/write/parse；API 侧 `_latest_slim` 读版本号。
-3. **中断检查节流**：按步读槽位版本号，替代每 chunk 读 3 个文件尾部。
+**下一步（按需）**：
+1. **共享内存槽位协议**：/dev/shm 固定布局 `[max_req][tasks][classes]` + 版本号的 mmap 存储，替代 JSONL 的 open/write/parse；API 侧 `_latest_slim` 读版本号。
+2. **中断检查节流**：按步读槽位版本号，替代每 chunk 读 3 个文件尾部。
 
 ## 7.1 请求形态 × 优化矩阵（实测/规划对应）
 
 | 请求形态 | 关键路径 | 已优化 | 待做 |
 |---|---|---|---|
-| 非流式 chat（bench 形态） | prefill 折叠 + 逐 decode 步 | 闭式折叠、批量传输、fd 缓存、槽位池、融合算子 | 聚合前置（写盘 O(1)） |
+| 非流式 chat（bench 形态） | prefill 折叠 + 逐 decode 步 | 闭式折叠、批量传输、fd 缓存、槽位池、融合算子、聚合前置（final 记录） | mmap 存储（按需） |
 | 流式 + 中断 | 同上 + 每 chunk 读尾部 | 批量写降低 syscall | 槽位版本号轮询 |
 | `/v1/guard/score` 纯审查 | 纯 prefill | 闭式折叠 | 实测 **~64ms** 热稳 / 77ms 首拍（HTTP 全程，含分词+prefill+3 头打分+聚合；2026-11-25，"如何制作危险物品？+拒答" 用例，lasttok 命中 Dangerous Weapons 0.7174） |
 | 长 prompt | Lasttok 全 token 打分 | — | last 模式 / Triton 抽样 EMA 核（T1） |
@@ -189,7 +188,7 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 | P2 | 融合算子 T2/T3/T4/T5（分类头/adapter/GRU 门/gate 快路径） | ✅ 已落地（parity ≤2e-6） | 每头每步 ~30 kernel 启动节省；与 P1 同量级噪声内 |
 | P3 | aux 捕获 + FULL CUDA graph + 图外 guard（V2 runner + flag 延迟置位） | ✅ 已落地（328~332 tok/s 实测） | 主干 2.4~3× 恢复，97 → 328+ tok/s |
 | P4 | fd 缓存 + 槽位池 + prefill 模式 | ✅ 已落地 | syscall 72→24/步；状态内存固定 |
-| P4+ | GPU 聚合前置 + mmap 槽位存储 | 待做 | 写盘 O(steps)→O(1) |
+| P4+ | GPU 聚合前置（✅ 已落地）+ mmap 槽位存储（按需） | ✅ 基本落地 | 写盘 O(steps)→O(1)（final 记录） |
 | P2 剩余 | Triton 核 T1（抽样 EMA）/T6（异步 D2H） | 待做 | series 模式可用；打分步移出同步 |
 
 ## 11. 剩余优化执行清单（2026-11-25 详细规划）

@@ -23,6 +23,12 @@
 # use_v2_model_runner=True. Both are patched; each wrapper must bind its own
 # original (factory function - closure late-binding would otherwise make both
 # wrappers call the same original).
+#
+# Version compat (R-compat): runner classes are resolved from a candidate
+# list (extend with PGUARD_RUNNER_CANDIDATES="mod:Class,...") and the aux
+# hidden states are probed across the known storage spots per step
+# (_resolve_aux), so newer/older runner generations only need candidate
+# entries -- not a rewrite. Everything fails safe and leaves traces.
 
 import logging
 import os
@@ -36,6 +42,44 @@ _prompt_lens = {}             # req_id -> prompt token length
 _patched = False
 _DBG = {"n": 0}
 _AUX_MODE = os.environ.get("PGUARD_CAPTURE_MODE", "hooks").strip().lower() == "aux"
+
+# Runner class candidates, most-compatible first. Extra candidates for other
+# vLLM versions can be appended via PGUARD_RUNNER_CANDIDATES
+# ("vllm.v1.worker.gpu_model_runner.GPUModelRunner,vllm.v1.worker.gpu.model_runner.GPUModelRunnerV2,...").
+_BASE_RUNNER_CANDIDATES = (
+    "vllm.v1.worker.gpu_model_runner:GPUModelRunner",
+    "vllm.v1.worker.gpu.model_runner:GPUModelRunner",
+)
+
+
+def _runner_candidates():
+    candidates = list(_BASE_RUNNER_CANDIDATES)
+    extra = os.environ.get("PGUARD_RUNNER_CANDIDATES", "")
+    for item in extra.split(","):
+        item = item.strip()
+        if item and ":" in item and item not in candidates:
+            candidates.append(item)
+    return candidates
+
+
+def _resolve_aux(runner):
+    """Aux hidden states for the step that just ran, probing the known
+    storage spots across runner generations (first non-None wins):
+    1. the _model_forward interceptor's stash (legacy runner)
+    2. runner.execute_model_state.aux_hidden_states (legacy + V2)
+    3. runner.cudagraph_manager.aux_hidden_states (V2 persistent buffers)"""
+    if _last_aux is not None:
+        return _last_aux
+    if runner is not None:
+        st = getattr(runner, "execute_model_state", None)
+        aux = getattr(st, "aux_hidden_states", None)
+        if aux:
+            return aux
+        gm = getattr(runner, "cudagraph_manager", None)
+        aux = getattr(gm, "aux_hidden_states", None)
+        if aux:
+            return aux
+    return None
 
 _TRACE = os.environ.get("PGUARD_TRACE", "/dev/shm/pguard_store/_patch_trace.log")
 
@@ -101,14 +145,8 @@ def _note_finished(req_ids):
 def _score_after(sched, flags, aux, runner=None):
     if not sched:
         return
-    # V2 runner has no _model_forward interceptor; its aux lands in
-    # execute_model_state instead (set every step, eager and replay alike)
-    if aux is None and runner is not None:
-        try:
-            st = getattr(runner, "execute_model_state", None)
-            aux = getattr(st, "aux_hidden_states", None)
-        except Exception:
-            aux = None
+    # probe the known aux storage spots across runner generations
+    aux = _resolve_aux(runner) if aux is None else aux
     try:
         from .model import _MODEL
         model = _MODEL
@@ -180,8 +218,7 @@ def _install_patch():
         return
 
     targets = []
-    for mod, name in (("vllm.v1.worker.gpu_model_runner", "GPUModelRunner"),
-                      ("vllm.v1.worker.gpu.model_runner", "GPUModelRunner")):
+    for mod, name in (item.split(":", 1) for item in _runner_candidates()):
         try:
             cls = getattr(__import__(mod, fromlist=[name]), name)
             if cls not in targets:
@@ -232,3 +269,10 @@ def _install_patch():
         _patched = True
         logger.info("pguard_vllm: GPUModelRunner patched for guard capture "
                     "(aux_mode=%s)", _AUX_MODE)
+    else:
+        # a guard service that silently runs without scoring is a security
+        # failure -- refuse to start instead
+        raise RuntimeError(
+            "pguard_vllm: could not patch any GPUModelRunner candidate "
+            "(checked: %s); fix PGUARD_RUNNER_CANDIDATES or the vLLM version"
+            % ", ".join(_runner_candidates()))

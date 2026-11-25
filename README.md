@@ -87,7 +87,7 @@ vllm serve /path/to/Qwen3.5-9B-FP8-dynamic \
 
 - 换安全头：改 `PGUARD_HEADS` 指向对应 checkpoint 目录（支持 lasttok / ema / gru，可多头同开）
 - 换主干：`hidden_size` 与层数匹配即可；捕获层用 `PGUARD_CAPTURE_LAYERS` 覆盖
-- 换 vLLM 版本：核对 `patch_runner.py` 里两个 runner 类的模块路径与 `execute_model` / `_model_forward` 结构（0.25.1 已验证；其他版本按规划文档 §11 R1 的方法重新核实）
+- 换 vLLM 版本：`patch_runner.py` 已做**多候选兼容**——runner 类从候选列表解析（可用 `PGUARD_RUNNER_CANDIDATES="模块:类名,..."` 追加新版本路径），aux 来源按候选链逐步探测（拦截器暂存 → `execute_model_state` → `cudagraph_manager`）。升级版本时先跑 `pguard_smoke_test.sh` 验收；0.25.1 已验证，其他版本按需补候选项
 
 ## API 用法
 
