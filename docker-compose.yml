@@ -1,0 +1,155 @@
+# PGuard / Qwen3.5-9B 服务编排
+#
+# 两种启动方式（二选一，端口都是 13553，不要同时启动）：
+#
+#   1) vLLM 方案：只跑 Qwen3.5-9B 主干，提供 OpenAI 兼容接口，
+#      不含安全头打分。适合先验证权重/链路。
+#        cp .env.example .env && docker compose --profile backbone up -d
+#
+#   2) SGLang 方案（官方 PGuard 集成）：主干 + 安全头，返回 guard_logits 风险分。
+#      （本机暂无 sglang 镜像，启用前需先准备 lmsysorg/sglang 镜像）
+#        cp .env.example .env && docker compose --profile sglang up -d --build
+#
+# 权重说明：./pg_weight/ 下是 PGuard 安全头（每个约 90MB），
+# 主干 Qwen3.5-9B 需单独下载到 ${HOST_BACKBONE_DIR}。
+
+services:
+
+  # ---------- 方案 1：vLLM 只跑主干（需显式 --profile backbone） ----------
+  vllm-backbone:
+    profiles: ["backbone"]
+    image: vllm/vllm-openai:latest-cu129   # 本机已有镜像（vLLM 0.25.1，含 qwen3_5）
+    container_name: pguard-vllm
+    restart: unless-stopped
+    ports:
+      - "${PGUARD_PORT:-13553}:8000"
+    environment:
+      # 容器内只看到这一张卡
+      - NVIDIA_VISIBLE_DEVICES=${PGUARD_GPU:-6}
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    volumes:
+      - ${HOST_BACKBONE_DIR:-./backbone/Qwen3.5-9B}:/models/backbone:ro
+    command: >
+      /models/backbone
+      --served-model-name pguard-backbone
+      --host 0.0.0.0 --port 8000
+      --dtype bfloat16
+      --enforce-eager
+      --max-model-len ${MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${GPU_MEM_UTIL:-0.90}
+      --max-num-seqs 32
+    shm_size: "16gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${PGUARD_GPU:-6}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  # ---------- 方案 2：SGLang + PGuard 安全头（官方部署路径） ----------
+  pguard-sglang:
+    profiles: ["sglang"]
+    build:
+      context: .
+      dockerfile: Dockerfile.sglang
+    image: pguard-sglang:latest
+    container_name: pguard-sglang
+    restart: unless-stopped
+    ports:
+      - "${PGUARD_PORT:-13553}:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${PGUARD_GPU:-6}
+      # PGuard 官方集成所需环境变量（见 pguard-src/deploy/README.md）
+      - SGLANG_EXTERNAL_MODEL_PACKAGE=pguard.sglang
+      - PGUARD_OVERWRITE_MODEL=1
+      - PGUARD_MODELING_VARIANT=${PGUARD_VARIANT:-seq}   # stateless | seq | cfc
+    volumes:
+      - ${HOST_BACKBONE_DIR:-./backbone/Qwen3.5-9B}:/models/backbone:ro
+      - ./pg_weight:/pguard_heads:ro
+    # 按变体把对应的头 checkpoint 挂到官方约定的环境变量上
+    command: >
+      bash -c '
+      case "$$PGUARD_MODELING_VARIANT" in
+        stateless) export PGUARD_MODEL_PATH=/pguard_heads/PGuard-Lasttok-Qwen3.5-9B ;;
+        cfc)       export PGUARD_CFC_STATE_PATH=/pguard_heads/PGuard-GRU-Qwen3.5-9B ;;
+        *)         export PGUARD_SEQ_STATE_PATH=/pguard_heads/PGuard-EMA-Qwen3.5-9B ;;
+      esac;
+      python -m sglang.launch_server
+      --model-path /models/backbone
+      --tp-size 1
+      --trust-remote-code
+      --incremental-streaming-output
+      --host 0.0.0.0 --port 8000'
+    shm_size: "16gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${PGUARD_GPU:-6}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 600s
+
+  # ---------- 方案 3：vLLM + PGuard 安全头（本仓库补丁包，混合模式） ----------
+  # chat 响应附带 guard_result；另有 POST /v1/guard/score 独立审查接口。
+  # 详见 pguard_vllm/DESIGN.md 与 docs 调用方案。
+  pguard-vllm-guard:
+    profiles: ["vllm-guard"]
+    image: vllm/vllm-openai:latest-cu129   # 本机已有镜像，免构建免拉取
+    entrypoint: python3                    # 镜像默认 entrypoint 是 vllm CLI，需覆盖
+
+    container_name: pguard-vllm-guard
+    restart: unless-stopped
+    ports:
+      - "${PGUARD_PORT:-13553}:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${PGUARD_GPU:-6}
+      - PGUARD_HEAD_PATH=/pguard_heads/${PGUARD_HEAD_SUBDIR:-PGuard-Lasttok-Qwen3.5-9B}
+      - PGUARD_HEADS=${PGUARD_HEADS:-}
+      - PGUARD_THRESHOLD=${PGUARD_THRESHOLD:-0.5}
+      - PYTHONPATH=/opt/pguard_vllm
+      - VLLM_ENABLE_V1_MULTIPROCESSING=0
+      - PGUARD_CFC_PREFILL_MODE=${PGUARD_CFC_PREFILL_MODE:-pool}
+      - PGUARD_ENFORCE_EAGER=${PGUARD_ENFORCE_EAGER:-1}
+      - PGUARD_CAPTURE_MODE=${PGUARD_CAPTURE_MODE:-hooks}
+      - PGUARD_TRACE_GUARD=${PGUARD_TRACE_GUARD:-0}
+      - VLLM_USE_V2_MODEL_RUNNER=${VLLM_USE_V2_MODEL_RUNNER:-0}
+    volumes:
+      - ${HOST_BACKBONE_DIR:-./backbone/Qwen3.5-9B}:/models/backbone:ro
+      - ./pg_weight:/pguard_heads:ro
+      - ./pguard_vllm:/opt/pguard_vllm
+      - ./artifacts:/artifacts
+    command: >
+      -m pguard_vllm.server
+      --model /models/backbone
+      --served-model-name pguard-backbone
+      --host 0.0.0.0 --port 8000
+      --max-model-len ${MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${GPU_MEM_UTIL:-0.90}
+      --max-num-seqs 32
+    shm_size: "16gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${PGUARD_GPU:-6}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 600s

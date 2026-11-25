@@ -1,0 +1,19 @@
+# local config (keep .env.example tracked)
+.env
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# runtime outputs
+artifacts/
+*.log
+
+# model checkpoints (downloaded separately, multi-GB)
+pg_weight/
+backbone/
+
+# upstream reference clone (has its own git history)
+pguard-src/

@@ -1,0 +1,14 @@
+# PGuard SGLang 部署镜像
+# 构建上下文 = PGuard/ 根目录（compose 中 context: .）
+#
+# 官方 README 要求：
+#   Qwen3.5 / GLM-4.5V  -> sglang 0.5.11（pip install -e '.[sglang0511]'）
+#   DeepSeek-V4-Flash   -> sglang 0.5.17（pip install -e '.[sglang0517]'）
+# 基础镜像自带 sglang，这里用普通 -e . 安装，避免 extras 改动镜像内 sglang 版本；
+# 如需严格对齐 0.5.11，请把基础镜像换成对应版本 tag，并改用 '.[sglang0511]'。
+FROM lmsysorg/sglang:latest
+
+COPY pguard-src/deploy /opt/pguard-deploy
+RUN pip install --no-cache-dir -e /opt/pguard-deploy
+
+ENV SGLANG_EXTERNAL_MODEL_PACKAGE=pguard.sglang
