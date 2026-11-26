@@ -90,7 +90,7 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 - 自检：`python3 -m pguard_vllm.store`、`python3 -m pguard_vllm.head`（三个真实 checkpoint）全过；`_ema_fold` vs 逐 token 循环（含跨 chunk 链式）最大相对误差 8e-8。
 - 冒烟：5 项全过，EMA 分数与记录一致（0.940 / 0.983）；**Lasttok 修复生效**（炸弹 0.902 命中、良性邮件 0.089 不误报）。
 - 流式中断：DAN 越狱 → `content_filter`，EMA Dangerous Weapons 0.942。
-- 性能（8 并发 3 头，2048 token）：**21.0s/97 tok/s → 13.0s/157.3、11.7s/174.9 tok/s**；单流 20.8 → 25.5-25.7 chunks/s；TTFT 0.11-0.14s 不变。
+- 性能（8 并发 3 头，2048 token）：**21.0s/97 tok/s → 13.0s/157.3、11.7s/174.9 tok/s**；单流 20.8 → 25.5-25.7 tok/s；TTFT 0.11-0.14s 不变。
 
 ### 4.1 第二批落地（2026-11-25 下午，官方 infra 对齐 + 数据结构改造）
 
@@ -133,12 +133,12 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 4. 配合 P1.6 的节流：非打分步跳过打分（EMA/GRU 状态更新保留）。
 
 **实验结果（2026-11-25，最终）**：✅ **R1 成功**。过程记录：legacy runner 的 FULL 捕获对 aux 元组不兼容（`_moe_model` AttributeError）；改用 V2 runner（`VLLM_USE_V2_MODEL_RUNNER=1`）后仍失败于 `load_model` 的 `assert speculative_config is not None`（aux 被认为必须伴随 drafter）；最终解法是 **flag 延迟置位**——`__init__` 后保持 `use_aux_hidden_state_outputs=False`（跳过该分支，aux 层已由 `_setup_pguard` 自行设置），包一层 `load_model` 在权重加载后再置 True，图捕获/回放/解包全部正常（V2 上 11 个 PIECEWISE + 7 个 FULL 图捕获成功）。
-- **实测（8 并发 3 头）**：**328.0 / 331.8 tok/s**（两轮），6.1~6.2s；单流 55.5~55.9 chunks/s；TTFT 0.06~0.09s；0 次 scoring failed。
+- **实测（8 并发 3 头）**：**328.0 / 331.8 tok/s**（两轮），6.1~6.2s；单流 55.5~55.9 tok/s；TTFT 0.06~0.09s；0 次 scoring failed。
 - **对照**：优化前 97 tok/s → **3.4×**；纯主干 eager 169~210 → 图模式后护栏吞吐反超 1.6~1.9×；达纯主干 CUDA graph 参考（505 tok/s）的 65%。
 - **分数口径**：图模式（compile + padding）带来 ~1% 相对偏移（0.9292 vs 0.9405、0.9847 vs 0.9833），判定结论与 eager 完全一致；DAN 流式中断回归通过（content_filter，0.9368）。
 - aux 获取路径：V2 无 `_model_forward`，`_score_after` 从 `runner.execute_model_state.aux_hidden_states` 读取（每步刷新的持久缓冲），trace 已验证 `mode=aux` 下 `scoring rows=N` 正常。
 
-图模式已可用：8 并发护栏吞吐 328~332 tok/s（优化前 97），单流 55+ chunks/s；guard 尾巴每步 <5ms。后续可选：用 vLLM 原生 breakable graph（`vllm/compilation/breakable_cudagraph.py`）做"非打分步跳过 guard 段"（对应官方 `breakable_patch.py` 的 `_conditional_replay`），作为 P3.5 备选。
+图模式已可用：8 并发护栏吞吐 328~332 tok/s（优化前 97），单流 55+ tok/s；guard 尾巴每步 <5ms。后续可选：用 vLLM 原生 breakable graph（`vllm/compilation/breakable_cudagraph.py`）做"非打分步跳过 guard 段"（对应官方 `breakable_patch.py` 的 `_conditional_replay`），作为 P3.5 备选。
 
 ## 7. P4：打分通道与存储协议
 

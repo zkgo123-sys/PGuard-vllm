@@ -166,13 +166,13 @@ curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json
 
 | 配置 | 执行模式 | 8 并发吞吐 | 单流速度 | TTFT | 显存 |
 |---|---|---|---|---|---|
-| 优化前（3 头） | eager | 97 tok/s | 20.8 chunks/s | 0.09~1.55s | 20.5 GB |
-| 纯主干（无护栏，公平基线） | eager | 169~210 tok/s | 24.0 chunks/s | 0.09s | 20.3 GB |
-| 优化后（3 头，融合/批量/闭式折叠） | eager | 152~178 tok/s | 24.6~25.7 chunks/s | 0.11~0.16s | 20.5 GB |
-| **优化后（3 头，V2 + FULL CUDA graph，当前默认）** | CUDA graph | **328~350 tok/s** | **52.7~55.9 chunks/s** | **0.06~0.09s** | **21.9 GB** |
-| **优化后 + 每 10 步打分（3 头，`PGUARD_COPY_LOGITS_PROB=0.1`）** | CUDA graph | **463~468 tok/s** | **65.3 chunks/s** | **0.06s** | 21.9 GB |
-| **优化后 + 单头 EMA + 每 10 步打分（推荐生产形态）** | CUDA graph | **497~506 tok/s** | **68.6~69.5 chunks/s** | **0.05~0.11s** | **21.6 GB** |
-| 纯主干（无护栏，参考） | CUDA graph | 505 tok/s | 69.8 chunks/s | 0.09s | 20.3 GB |
+| 优化前（3 头） | eager | 97 tok/s | 20.8 tok/s | 0.09~1.55s | 20.5 GB |
+| 纯主干（无护栏，公平基线） | eager | 169~210 tok/s | 24.0 tok/s | 0.09s | 20.3 GB |
+| 优化后（3 头，融合/批量/闭式折叠） | eager | 152~178 tok/s | 24.6~25.7 tok/s | 0.11~0.16s | 20.5 GB |
+| **优化后（3 头，V2 + FULL CUDA graph，当前默认）** | CUDA graph | **328~350 tok/s** | **52.7~55.9 tok/s** | **0.06~0.09s** | **21.9 GB** |
+| **优化后 + 每 10 步打分（3 头，`PGUARD_COPY_LOGITS_PROB=0.1`）** | CUDA graph | **463~468 tok/s** | **65.3 tok/s** | **0.06s** | 21.9 GB |
+| **优化后 + 单头 EMA + 每 10 步打分（推荐生产形态）** | CUDA graph | **497~506 tok/s** | **68.6~69.5 tok/s** | **0.05~0.11s** | **21.6 GB** |
+| 纯主干（无护栏，参考） | CUDA graph | 505 tok/s | 69.8 tok/s | 0.09s | 20.3 GB |
 
 显存为 `nvidia-smi` 对整卡实读（含 CUDA 上下文），`gpu_memory_utilization=0.90`；完整数据与读数见 `PGuard-实测记录.md` §3.6。
 
