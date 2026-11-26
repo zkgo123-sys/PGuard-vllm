@@ -112,7 +112,7 @@
 
 ## 3. 性能
 
-测试方法：`bench_guard.py`，8 条并发请求 × `max_tokens=256`（共 2048 completion tokens），非流式；另有 1 条 300 token 流式请求测 TTFT 与单流速度。所有配置都在**同一张 GPU 6** 上先后运行，唯一变量是护栏与执行模式。
+测试方法：`bench_guard.py`，8 条并发请求 × `max_tokens=256`（共 2048 completion tokens），非流式；另有 1 条 300 token 流式请求测 TTFT 与单流速度。单流速度按**生成的 token 数**计（每 token 一个流式 delta；已用 `stream_options.include_usage` 的 usage 核对，流式 chunk 数与 token 数一致）。所有配置都在**同一张 GPU 6** 上先后运行，唯一变量是护栏与执行模式。
 
 ### 3.1 优化前基线（首测，原始记录）
 
