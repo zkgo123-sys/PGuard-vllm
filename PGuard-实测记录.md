@@ -235,6 +235,7 @@ curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json
 ```bash
 docker exec pguard-vllm-guard python3 -m pguard_vllm.store
 docker exec pguard-vllm-guard python3 -m pguard_vllm.state_pool
+docker exec pguard-vllm-guard python3 -m pguard_vllm.model   # 间隔打分的分发自检
 docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_vllm.head
 ```
 
@@ -254,6 +255,7 @@ docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_v
 - **补丁装不上会直接拒绝启动**（`RuntimeError: could not patch any GPUModelRunner candidate`），不会带着"护栏静默失效"的状态对外服务。其他版本的 vLLM 可用 `PGUARD_RUNNER_CANDIDATES="模块:类名,..."` 追加候选。
 - **请求 id 带后缀**：vLLM 0.25.1 引擎侧写分数文件时请求 id 会多一段后缀（如 `pguard-<uuid>-aee14d49`），store 里按前缀 glob 的兜底**不能删**——曾误删导致 `/v1/guard/score` 全部 503。
 - **改了补丁要重启容器**才生效（live-mount + editable install，不用重建镜像）。
+- **间隔打分下 Lasttok 的 prompt 分数曾丢失**（11-26 修复）：`PGUARD_COPY_LOGITS_PROB` < 1 时，新请求的 prompt 若和其他请求的 decode 同步、且该步不打分，Lasttok 头连这段 prompt 也不打分。已改为 prompt 行始终打分，只有输出 token 跟随间隔；默认配置（每步打分）前后行为一致。同时补了 compose 对 `PGUARD_COPY_LOGITS_PROB` / `PGUARD_SCORE_INTERVAL` 的透传。间隔打分模式本身还没有端到端实测。
 
 待查项：
 

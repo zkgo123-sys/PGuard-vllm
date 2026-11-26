@@ -354,11 +354,13 @@ class Qwen3_5PGuardForConditionalGeneration(Qwen3_5ForConditionalGeneration):
             kind = self.pguard_cfgs[name].pguard_version
             pos = self._layer_pos_by_head[name]
             if kind == "lasttok":
-                if score:
+                # prefill rows always score; only decode rows follow the cadence
+                lt_decode = decode_rows if score else []
+                if prefill_rows or lt_decode:
                     self._score_lasttok(name, head, pos,
-                                        prefill_rows + decode_rows,
+                                        prefill_rows + lt_decode,
                                         [False] * len(prefill_rows)
-                                        + [True] * len(decode_rows))
+                                        + [True] * len(lt_decode))
             elif kind == "ema":
                 if prefill_rows:
                     self._ema_prefill(name, head, pos, prefill_rows)
@@ -488,10 +490,7 @@ class Qwen3_5PGuardForConditionalGeneration(Qwen3_5ForConditionalGeneration):
         return padded, mask
 
     # -- lasttok (stateless) ----------------------------------------------
-    def _score_lasttok(self, head_name: str, head, layer_pos, rows, decode_flags,
-                       score=True):
-        if not score:
-            return
+    def _score_lasttok(self, head_name: str, head, layer_pos, rows, decode_flags):
         rows = [(rid, f[layer_pos]) for rid, f in rows]
         if self._prefill_risk_mode == "last":
             # score only each request's final token (decode rows are n=1, so
@@ -670,3 +669,66 @@ class Qwen3_5PGuardForConditionalGeneration(Qwen3_5ForConditionalGeneration):
 # (kept annotation-free: this module is imported inside vLLM's architecture
 #  inspection subprocess, where every name must already be defined)
 guard_store = None
+
+
+if __name__ == "__main__":
+    # self-test: cadence dispatch. A prompt that joins while other requests
+    # are decoding keeps its Lasttok prompt-side score on every step; only
+    # decode rows thin out, and EMA/GRU state updates never thin out.
+    import types
+
+    def _dispatch(interval, arrive):
+        m = object.__new__(Qwen3_5PGuardForConditionalGeneration)
+        m._pguard_ready, m._capture_mode, m._cap = True, "aux", {}
+        m._capture_module_idx = [0, 1, 2]
+        m._score_interval, m._decode_step, m._step_count = interval, 0, 0
+        m._prefill_done, m._prefill_risk_mode = set(), "all"
+        m.pguard_heads = {"lt": object(), "ema": object(), "gru": object()}
+        m.pguard_cfgs = {k: types.SimpleNamespace(pguard_version=v) for k, v in
+                         (("lt", "lasttok"), ("ema", "ema"), ("gru", "gru"))}
+        m._layer_pos_by_head = {"lt": 0, "ema": 1, "gru": 2}
+        calls = []
+
+        def _rec(name):
+            return lambda *a, **k: calls.append(
+                (name, [r[0] for r in a[3]], k.get("score", True)))
+
+        for name in ("_score_lasttok", "_ema_prefill", "_ema_decode",
+                     "_gru_prefill", "_gru_decode"):
+            setattr(m, name, _rec(name))
+        m._evict_finished_states = lambda *a, **k: None
+        one = [torch.zeros(1, 8)] * 3
+        for _ in range(arrive - 1):     # advance the decode-step counter
+            m.run_guard_step({"A": 1}, [True], one)
+        calls.clear()
+        # B's 5-token prompt is scheduled in the same step as A's decode token
+        sched, flags = {"A": 1, "B": 5}, [True, False]
+        aux = [torch.zeros(6, 8)] * 3
+        m.run_guard_step(sched, flags, aux)
+        return calls
+
+    def _lt_prompt_scored(calls):
+        return "B" in [rid for name, rids, _ in calls
+                       if name == "_score_lasttok" for rid in rids]
+
+    bad = []
+    for arrive in (1, 4, 10):           # production default: nothing thins out
+        calls = _dispatch(1, arrive)
+        lt = [rids for name, rids, _ in calls if name == "_score_lasttok"]
+        if not (_lt_prompt_scored(calls) and lt == [["B", "A"]]
+                and all(s for _, _, s in calls)):
+            bad.append("interval=1 arrive=%d" % arrive)
+    for arrive in range(1, 11):         # cadence 10: only step 10 scores decode
+        calls = _dispatch(10, arrive)
+        hit = arrive % 10 == 0
+        dec = [(n, rids, s) for n, rids, s in calls if n.endswith("_decode")]
+        if not (_lt_prompt_scored(calls)
+                and any(n == "_ema_prefill" and "B" in rids
+                        for n, rids, _ in calls)
+                and len(dec) == 2
+                and all(rids == ["A"] and s == hit for _, rids, s in dec)):
+            bad.append("interval=10 arrive=%d" % arrive)
+    for b in bad:
+        print("FAIL", b)
+    print("model cadence self-test:", "FAILED (%d)" % len(bad) if bad else "ok")
+    raise SystemExit(1 if bad else 0)

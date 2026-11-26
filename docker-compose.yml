@@ -126,6 +126,9 @@ services:
       - PGUARD_CAPTURE_MODE=${PGUARD_CAPTURE_MODE:-hooks}
       - PGUARD_TRACE_GUARD=${PGUARD_TRACE_GUARD:-0}
       - VLLM_USE_V2_MODEL_RUNNER=${VLLM_USE_V2_MODEL_RUNNER:-0}
+      # 打分节流：1.0 = 每 step 打分；0.1 = 每 10 步打 1 次（官方 cadence）
+      - PGUARD_COPY_LOGITS_PROB=${PGUARD_COPY_LOGITS_PROB:-1.0}
+      - PGUARD_SCORE_INTERVAL=${PGUARD_SCORE_INTERVAL:-}
     volumes:
       - ${HOST_BACKBONE_DIR:-./backbone/Qwen3.5-9B}:/models/backbone:ro
       - ./pg_weight:/pguard_heads:ro

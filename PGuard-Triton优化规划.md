@@ -229,9 +229,17 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 
 ### R6 产品形态建议（零代码）
 
-- 生产建议**单头 EMA**（`PGUARD_HEADS=PGuard-EMA-Qwen3.5-9B`）：三头同时在线护栏成本 ×3，且实测 EMA 判别力最稳；多头共识可作为旁路部署需求保留。
+- 生产建议**单头 EMA**（`PGUARD_HEADS=PGuard-EMA-Qwen3.5-9B`）：EMA 判别力最稳；多头共识可作为旁路部署需求保留。注意每步有不随头数减少的固定开销（特征汇总、按请求分段、写记录），单头成本不是严格 ÷3，单头实测数据待补。
 - 纯审查/长 prompt 场景开 `PGUARD_PREFILL_RISK_MODE=last`。
 - 精度敏感场景再评估 `PGUARD_HEAD_DTYPE=bf16`（EMA 头带宽减半，需 parity 集通过）。
+
+### R7 修复：间隔打分下 Lasttok 的 prompt 侧分数丢失 —— ✅ 已修复（2026-11-26）
+
+- **现象**：`PGUARD_COPY_LOGITS_PROB` < 1 时，新请求的 prompt 与其他请求的 decode 落在同一步、且该步不打分，Lasttok 头连这段 prompt 也跳过。prompt 只在该步出现，于是该请求的 Lasttok prompt 侧分数永久丢失（10 个到达步里 9 个中招）。EMA / GRU 的 prefill 分支不受影响。
+- **修复**：`model.py::run_guard_step` 中 Lasttok 只让 decode 行跟随间隔，prefill 行始终打分（与官方 `begin_forward` 语义一致）。
+- **验证**：`python3 -m pguard_vllm.model` 自检，对旧逻辑 9/13 场景失败、对新逻辑全过。默认配置（每步打分）行为不变。
+- **附带**：`docker-compose.yml` 补 `PGUARD_COPY_LOGITS_PROB` / `PGUARD_SCORE_INTERVAL` 透传（此前 compose 不传这两个变量，设了也不生效）。
+- **未做**：间隔打分模式还没有在真实引擎上端到端跑过。
 
 ### 执行顺序与里程碑
 
@@ -242,3 +250,4 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 | 3 | R6 单头/形态建议落地 | 0 | 护栏成本 ÷3（如采纳） |
 | 4 | R5 breakable 段跳过 | — | ✅ 被架构消化（guard 在图外 + cadence） |
 | 5 | R3/R4 Triton 补齐 | — | ⏸ 关闭（触发条件见上），按需重启 |
+| 6 | R7 间隔打分下 Lasttok prompt 修复 | 0 | ✅ 已修复（自检覆盖） |

@@ -152,7 +152,7 @@ curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json
 | `PGUARD_ENFORCE_EAGER` | `0` | `1`=强制 eager（最稳）；`0`=CUDA graph（需 aux + V2） |
 | `PGUARD_CAPTURE_MODE` | `aux` | `aux`=EAGLE3 式捕获（支持图）；`hooks`=前向钩子（仅 eager） |
 | `VLLM_USE_V2_MODEL_RUNNER` | `1` | V2 runner（`ModelCudaGraphManager` 支持 aux 元组） |
-| `PGUARD_COPY_LOGITS_PROB` | `1.0` | 打分比例，`0.1` = 每 10 个 decode 步打 1 次（官方 cadence） |
+| `PGUARD_COPY_LOGITS_PROB` | `1.0` | 打分比例，`0.1` = 每 10 个 decode 步打 1 次（官方 cadence）；prompt 侧不受影响 |
 | `PGUARD_SCORE_INTERVAL` | — | 直接指定打分间隔（步数），优先于比例 |
 | `PGUARD_PREFILL_RISK_MODE` | `all` | `all`=Lasttok prefill 逐 token（支持 series）；`last`=只打末 token（长 prompt 更快） |
 | `PGUARD_HEAD_DTYPE` | `fp32` | 头精度，`bf16` 减半带宽（需 parity 验证） |
@@ -218,6 +218,7 @@ PGuard-Triton优化规划.md  优化规划与执行清单（含实测数据）
 ```bash
 docker exec pguard-vllm-guard python3 -m pguard_vllm.store
 docker exec pguard-vllm-guard python3 -m pguard_vllm.state_pool
+docker exec pguard-vllm-guard python3 -m pguard_vllm.model   # 间隔打分的分发自检
 docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_vllm.head
 ```
 
