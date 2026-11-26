@@ -2,15 +2,15 @@
 
 把 [PGuard](https://github.com/Alibaba-AAIG/PGuard) 安全护栏移植到 **vLLM v0.25.1** 的补丁包：冻结的 Qwen3.5 主干在正常生成的同时逐 token 输出 9 维风险概率（38 类），提供 OpenAI 兼容接口 + 独立安全审查接口 + 流式中断。**不修改 vLLM 源码、不修改 PGuard 权重**，全部通过"继承 + 注册 + 运行时补丁"实现。
 
-经过三轮优化（V2 runner + FULL CUDA graph、GPU 聚合前置、融合算子、槽位池化、扁平分数记录），8 并发 3 头全开的吞吐从 **97 tok/s 提升到 328~350 tok/s**（约 3.5×）。与单独主干同执行模式相比，护栏带来的吞吐损失为 eager 约 -13%、CUDA graph 约 -33%（护栏自身开销约 6~8 ms/步）；打开每 10 步打分（`PGUARD_COPY_LOGITS_PROB=0.1`）后三头吞吐 **463~468 tok/s**，相对单独主干约 -8%；生产推荐的单头 EMA 形态（单头 + 每 10 步打分）实测 **497~506 tok/s**，与单独主干持平。
+经过三轮优化（V2 runner + FULL CUDA graph、GPU 聚合前置、融合算子、槽位池化、扁平分数记录），8 并发 3 头全开的吞吐从 **97 tok/s 提升到 328～350 tok/s**（约 3.5×）。与单独主干同执行模式相比，护栏带来的吞吐损失为 eager 约 -13%、CUDA graph 约 -33%（护栏自身开销约 6～8 ms/步）；打开每 10 步打分（`PGUARD_COPY_LOGITS_PROB=0.1`）后三头吞吐 **463～468 tok/s**，相对单独主干约 -8%；生产推荐的单头 EMA 形态（单头 + 每 10 步打分）实测 **497～506 tok/s**，与单独主干持平。
 
 ## 核心特性
 
 - **三种安全头同时在线**：Lasttok（87MB，无状态）/ EMA（858MB，多尺度 EMA 状态）/ GRU（72MB，CfC 递推），共享同一份主干与捕获层
 - **混合模式**：`/v1/chat/completions` 正常生成，响应附带 `guard_result`；流式下支持 `guard_interrupt` 中断（prompt 侧命中时在任何内容输出前截断，实测 30/30 次零泄漏）
-- **独立审查**：`/v1/guard/score` 只打分不生成，**实测 ~64ms** 热稳往返
+- **独立审查**：`/v1/guard/score` 只打分不生成，**实测 ～64ms** 热稳往返
 - **CUDA graph 加速**：V2 runner + EAGLE3 式 aux 捕获 + flag 延迟置位，主干整图 replay、guard 在图外步后打分
-- **打分节流**：`PGUARD_COPY_LOGITS_PROB=0.1` 时每 10 个输出 token 打分 1 次（官方同款 cadence），状态更新与 prompt 侧打分不中断；三头吞吐 463~468 tok/s
+- **打分节流**：`PGUARD_COPY_LOGITS_PROB=0.1` 时每 10 个输出 token 打分 1 次（官方同款 cadence），状态更新与 prompt 侧打分不中断；三头吞吐 463～468 tok/s
 
 ## 快速开始
 
@@ -116,7 +116,7 @@ curl -s http://127.0.0.1:13553/v1/chat/completions -H 'Content-Type: application
 }'
 ```
 
-### 独立安全审查（只打分不生成，实测 ~64ms）
+### 独立安全审查（只打分不生成，实测 ～64ms）
 
 ```bash
 curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json' -d '{
@@ -166,19 +166,19 @@ curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json
 
 | 配置 | 执行模式 | 8 并发吞吐 | 单流速度 | TTFT | 显存 |
 |---|---|---|---|---|---|
-| 优化前（3 头） | eager | 97 tok/s | 20.8 tok/s | 0.09~1.55s | 20.5 GB |
-| 纯主干（无护栏，公平基线） | eager | 169~210 tok/s | 24.0 tok/s | 0.09s | 20.3 GB |
-| 优化后（3 头，融合/批量/闭式折叠） | eager | 152~178 tok/s | 24.6~25.7 tok/s | 0.11~0.16s | 20.5 GB |
-| **优化后（3 头，V2 + FULL CUDA graph，当前默认）** | CUDA graph | **328~350 tok/s** | **52.7~55.9 tok/s** | **0.06~0.09s** | **21.9 GB** |
-| **优化后 + 每 10 步打分（3 头，`PGUARD_COPY_LOGITS_PROB=0.1`）** | CUDA graph | **463~468 tok/s** | **65.3 tok/s** | **0.06s** | 21.9 GB |
-| **优化后 + 单头 EMA + 每 10 步打分（推荐生产形态）** | CUDA graph | **497~506 tok/s** | **68.6~69.5 tok/s** | **0.05~0.11s** | **21.6 GB** |
+| 优化前（3 头） | eager | 97 tok/s | 20.8 tok/s | 0.09～1.55s | 20.5 GB |
+| 纯主干（无护栏，公平基线） | eager | 169～210 tok/s | 24.0 tok/s | 0.09s | 20.3 GB |
+| 优化后（3 头，融合/批量/闭式折叠） | eager | 152～178 tok/s | 24.6～25.7 tok/s | 0.11～0.16s | 20.5 GB |
+| **优化后（3 头，V2 + FULL CUDA graph，当前默认）** | CUDA graph | **328～350 tok/s** | **52.7～55.9 tok/s** | **0.06～0.09s** | **21.9 GB** |
+| **优化后 + 每 10 步打分（3 头，`PGUARD_COPY_LOGITS_PROB=0.1`）** | CUDA graph | **463～468 tok/s** | **65.3 tok/s** | **0.06s** | 21.9 GB |
+| **优化后 + 单头 EMA + 每 10 步打分（推荐生产形态）** | CUDA graph | **497～506 tok/s** | **68.6～69.5 tok/s** | **0.05～0.11s** | **21.6 GB** |
 | 纯主干（无护栏，参考） | CUDA graph | 505 tok/s | 69.8 tok/s | 0.09s | 20.3 GB |
 
 显存为 `nvidia-smi` 对整卡实读（含 CUDA 上下文），`gpu_memory_utilization=0.90`；完整数据与读数见 `PGuard-实测记录.md` §3.6。
 
-独立审查接口 `/v1/guard/score`：**~64ms** 热稳 / 77ms 首拍（HTTP 全程）。
+独立审查接口 `/v1/guard/score`：**～64ms** 热稳 / 77ms 首拍（HTTP 全程）。
 
-判定一致性：图模式与 eager 的判定结论完全一致，分数存在 ~1% 相对偏移（compile + padding 的正常数值差）。
+判定一致性：图模式与 eager 的判定结论完全一致，分数存在 ～1% 相对偏移（compile + padding 的正常数值差）。
 
 ## 架构与优化要点
 
@@ -233,7 +233,7 @@ docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_v
 ## 已知限制
 
 1. 不支持 speculative decode（与钩子/分段假设冲突）
-2. 图模式下分数有 ~1% 相对偏移（compile + padding 数值差），判定结论与 eager 一致；阈值上线前建议按业务样本校准
+2. 图模式下分数有 ～1% 相对偏移（compile + padding 数值差），判定结论与 eager 一致；阈值上线前建议按业务样本校准
 3. FP8 主干 vs bf16 训练头存在精度差，GRU 头区分度偏弱，生产建议以 EMA 头为准
 4. EMA 头的 prompt series 为"每 prefill 块末 token"口径；逐 token series 需 T1 抽样 EMA 核（见规划文档 §11 R3，按需启用）
 5. 间隔打分（`PGUARD_COPY_LOGITS_PROB` < 1）时输出 token 只有 1/N 出分数：`response_scores_max` 只统计被打分的 token，输出侧风险的流式中断最多晚 N-1 个 token；prompt 侧不受影响
