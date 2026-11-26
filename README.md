@@ -2,7 +2,7 @@
 
 把 [PGuard](https://github.com/Alibaba-AAIG/PGuard) 安全护栏移植到 **vLLM v0.25.1** 的补丁包：冻结的 Qwen3.5 主干在正常生成的同时逐 token 输出 9 维风险概率（38 类），提供 OpenAI 兼容接口 + 独立安全审查接口 + 流式中断。**不修改 vLLM 源码、不修改 PGuard 权重**，全部通过"继承 + 注册 + 运行时补丁"实现。
 
-经过三轮优化（V2 runner + FULL CUDA graph、GPU 聚合前置、融合算子、槽位池化、扁平分数记录），8 并发 3 头全开的吞吐从 **97 tok/s 提升到 350.5 tok/s**（3.6×），已超过纯主干 eager 基线（169~210）。
+经过三轮优化（V2 runner + FULL CUDA graph、GPU 聚合前置、融合算子、槽位池化、扁平分数记录），8 并发 3 头全开的吞吐从 **97 tok/s 提升到 328~350 tok/s**（约 3.5×）。与单独主干同执行模式相比，护栏带来的吞吐损失为 eager 约 -13%、CUDA graph 约 -33%（护栏自身开销约 6~8 ms/步）。
 
 ## 核心特性
 
