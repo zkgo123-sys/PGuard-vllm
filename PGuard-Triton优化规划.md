@@ -168,6 +168,7 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 - **正确性**：`pguard_smoke_test.sh` 5 项 + Lasttok 单头两组用例（炸弹命中、良性邮件不误报）+ `return_series=true` 的序列对齐检查；P2 每个内核与 torch 回退的 parity 断言进模块自测。
 - **性能协议**：`bench_guard.py`，并发 8/16/32，报 3 次中位数；单头 EMA 配置用于与官方 0.8%~2.3% 对齐比较；记录 TTFT 与单流速度。
 - **目标**：单头 EMA 8 并发护栏开销 ≤5%（对齐官方量级）；三头全开 ≤15%；`PGUARD_COPY_LOGITS_PROB=0.1` 时三头 ≤5%。恢复 CUDA graph 后 8 并发总耗时目标 <7s（>300 tok/s）。
+- **实测对照（11-26）**：三头每步打分约 -33%（333~349 tok/s）；三头 + `0.1` 约 -8%（463~468 tok/s），没达到“三头 + 0.1 ≤5%”。与官方对齐的配置（单头 + `0.1`）还没测。
 
 ## 9. 风险与回退
 
@@ -239,7 +240,14 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 - **修复**：`model.py::run_guard_step` 中 Lasttok 只让 decode 行跟随间隔，prefill 行始终打分（与官方 `begin_forward` 语义一致）。
 - **验证**：`python3 -m pguard_vllm.model` 自检，对旧逻辑 9/13 场景失败、对新逻辑全过。默认配置（每步打分）行为不变。
 - **附带**：`docker-compose.yml` 补 `PGUARD_COPY_LOGITS_PROB` / `PGUARD_SCORE_INTERVAL` 透传（此前 compose 不传这两个变量，设了也不生效）。
-- **未做**：间隔打分模式还没有在真实引擎上端到端跑过。
+- **端到端**（11-26）：三头 + 每 10 步打分在真实引擎上实测 463~468 tok/s（每步打分同场 333~349），晚到请求 16/16 保留 prompt 分数；详见 `PGuard-实测记录.md` §3.5。
+
+### R8 修复：流式中断被输出记录盖住 prompt 命中 —— ✅ 已修复（2026-11-26）
+
+- **现象**：流式 `guard_interrupt` 在 `content_filter` 之前先吐 2~4 个内容 chunk（首测起挂着的待查项）。
+- **根因**：中断检查只读每个头最新一条打分记录（文件尾 4KB）。prompt 记录后面只要跟上一条正常的输出记录，prompt 侧的命中就被盖住；长 prompt 的记录超过 4KB，也读不到。prompt 有风险但输出不越线的请求，可能完全不被打断。
+- **修复**：引擎每步维护每个请求的实时状态文件（prompt 结论 + 输出侧累计最大值，与最终 `guard_result` 同口径），只在最高非 normal 概率上升时重写；`server.py::_latest_slim` 改读它，`store.latest` 删除。自检 `python3 -m pguard_vllm.server --self-test`。
+- **验证**：3 个风险用例 30/30 `content_filter`，中断前内容 chunk 0 个；良性用例 6/6 正常结束。每步打分的吞吐 338~345 tok/s，与修复前同场（333~349）在噪声内。每步都重写的第一版是 328.7 / 328.6 tok/s，已改成只在最高值上升时写。
 
 ### 执行顺序与里程碑
 
@@ -251,3 +259,4 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 | 4 | R5 breakable 段跳过 | — | ✅ 被架构消化（guard 在图外 + cadence） |
 | 5 | R3/R4 Triton 补齐 | — | ⏸ 关闭（触发条件见上），按需重启 |
 | 6 | R7 间隔打分下 Lasttok prompt 修复 | 0 | ✅ 已修复（自检覆盖） |
+| 7 | R8 流式中断修复 | 0 | ✅ 已修复（30/30 零泄漏） |

@@ -2,15 +2,15 @@
 
 把 [PGuard](https://github.com/Alibaba-AAIG/PGuard) 安全护栏移植到 **vLLM v0.25.1** 的补丁包：冻结的 Qwen3.5 主干在正常生成的同时逐 token 输出 9 维风险概率（38 类），提供 OpenAI 兼容接口 + 独立安全审查接口 + 流式中断。**不修改 vLLM 源码、不修改 PGuard 权重**，全部通过"继承 + 注册 + 运行时补丁"实现。
 
-经过三轮优化（V2 runner + FULL CUDA graph、GPU 聚合前置、融合算子、槽位池化、扁平分数记录），8 并发 3 头全开的吞吐从 **97 tok/s 提升到 328~350 tok/s**（约 3.5×）。与单独主干同执行模式相比，护栏带来的吞吐损失为 eager 约 -13%、CUDA graph 约 -33%（护栏自身开销约 6~8 ms/步）。
+经过三轮优化（V2 runner + FULL CUDA graph、GPU 聚合前置、融合算子、槽位池化、扁平分数记录），8 并发 3 头全开的吞吐从 **97 tok/s 提升到 328~350 tok/s**（约 3.5×）。与单独主干同执行模式相比，护栏带来的吞吐损失为 eager 约 -13%、CUDA graph 约 -33%（护栏自身开销约 6~8 ms/步）；打开每 10 步打分（`PGUARD_COPY_LOGITS_PROB=0.1`）后三头吞吐 **463~468 tok/s**，相对单独主干约 -8%。
 
 ## 核心特性
 
 - **三种安全头同时在线**：Lasttok（87MB，无状态）/ EMA（858MB，多尺度 EMA 状态）/ GRU（72MB，CfC 递推），共享同一份主干与捕获层
-- **混合模式**：`/v1/chat/completions` 正常生成，响应附带 `guard_result`；流式下支持 `guard_interrupt` 逐 token 中断
+- **混合模式**：`/v1/chat/completions` 正常生成，响应附带 `guard_result`；流式下支持 `guard_interrupt` 中断（prompt 侧命中时在任何内容输出前截断，实测 30/30 次零泄漏）
 - **独立审查**：`/v1/guard/score` 只打分不生成，**实测 ~64ms** 热稳往返
 - **CUDA graph 加速**：V2 runner + EAGLE3 式 aux 捕获 + flag 延迟置位，主干整图 replay、guard 在图外步后打分
-- **打分节流**：`PGUARD_COPY_LOGITS_PROB=0.1` 时仅每 10 步打分一次（官方同款 cadence），状态更新不中断
+- **打分节流**：`PGUARD_COPY_LOGITS_PROB=0.1` 时每 10 个输出 token 打分 1 次（官方同款 cadence），状态更新与 prompt 侧打分不中断；三头吞吐 463~468 tok/s
 
 ## 快速开始
 
@@ -170,7 +170,10 @@ curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json
 | 纯主干 eager（公平基线） | 169~210 tok/s | 24.0 chunks/s | 0.09s |
 | 优化后（eager + 融合/批量/闭式折叠） | 152~178 tok/s | 24.6~25.7 chunks/s | 0.11~0.16s |
 | **优化后（V2 + FULL CUDA graph，当前默认）** | **328~350 tok/s** | **52.7~55.9 chunks/s** | **0.06~0.09s** |
+| **优化后 + 每 10 步打分（三头，`PGUARD_COPY_LOGITS_PROB=0.1`）** | **463~468 tok/s** | **65.3 chunks/s** | **0.06s** |
 | 纯主干 CUDA graph（参考，无护栏） | 505 tok/s | 69.8 chunks/s | 0.09s |
+
+每 10 步打分：只有 1/10 的输出 token 出分数，prompt 侧照常打分；详见 `PGuard-实测记录.md` §3.5。
 
 独立审查接口 `/v1/guard/score`：**~64ms** 热稳 / 77ms 首拍（HTTP 全程）。
 
@@ -186,9 +189,10 @@ messages → vLLM EngineCore（V2 runner，FULL/PIECEWISE CUDA graph）
 execute_model 步后（图外 Python 尾巴，真实调度步才执行）
              │ 按 SchedulerOutput.num_scheduled_tokens 分段 → 槽位池取状态
              │ → Lasttok / EMA / GRU 头打分（融合算子）→ GPU 聚合（running max/last）
-             │ → 单次 D2H → GuardStore 逐步记录 + final 记录
+             │ → 单次 D2H → GuardStore 逐步记录 + final 记录 + 实时状态
              ▼
-API 进程：pop() O(1) 读 final → guard_result / 流式中断 / 独立审查
+API 进程：pop() O(1) 读 final → guard_result / 独立审查
+          流式中断读实时状态文件（prompt 结论 + 输出侧累计最大值）
 ```
 
 - 捕获层解析遵循官方语义：`PGUARD_CAPTURE_LAYERS` > `pguard_capture_layers` > `selected_layers` > `feature_layers`（20/24/28 层）
@@ -203,13 +207,15 @@ pguard_vllm/            补丁包（pyproject + 9 个模块）
   pguard_vllm/model.py        自定义架构：捕获 + 分段 + 三头打分
   pguard_vllm/patch_runner.py execute_model/_model_forward 运行时补丁
   pguard_vllm/state_pool.py   槽位池（状态 + 分数聚合）
-  pguard_vllm/store.py        /dev/shm 分数存储（flat + final 记录）
+  pguard_vllm/store.py        /dev/shm 分数存储（flat + final 记录 + 实时状态）
   pguard_vllm/head.py head_seq.py   三种安全头（含融合算子）
   pguard_vllm/server.py       FastAPI（chat + guard/score + 中断）
   DESIGN.md                   设计与 vLLM 内部事实
 docker-compose.yml      三 profile：vllm-guard（默认）/ backbone / sglang
 bench_guard.py          并发基准
 pguard_smoke_test.sh    5 项判定用例
+pguard_interrupt_e2e.py 流式中断端到端用例（风险用例零泄漏、良性不误中断）
+pguard_cadence_e2e.py   晚到请求保留 prompt 分数 + 打分比例的端到端用例
 PGuard-Triton优化规划.md  优化规划与执行清单（含实测数据）
 ```
 
@@ -219,6 +225,7 @@ PGuard-Triton优化规划.md  优化规划与执行清单（含实测数据）
 docker exec pguard-vllm-guard python3 -m pguard_vllm.store
 docker exec pguard-vllm-guard python3 -m pguard_vllm.state_pool
 docker exec pguard-vllm-guard python3 -m pguard_vllm.model   # 间隔打分的分发自检
+docker exec pguard-vllm-guard python3 -m pguard_vllm.server --self-test   # 流式中断检查
 docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_vllm.head
 ```
 
@@ -228,8 +235,9 @@ docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_v
 2. 图模式下分数有 ~1% 相对偏移（compile + padding 数值差），判定结论与 eager 一致；阈值上线前建议按业务样本校准
 3. FP8 主干 vs bf16 训练头存在精度差，GRU 头区分度偏弱，生产建议以 EMA 头为准
 4. EMA 头的 prompt series 为"每 prefill 块末 token"口径；逐 token series 需 T1 抽样 EMA 核（见规划文档 §11 R3，按需启用）
-5. 多模态（图片）输入未列入验证范围
-6. 同一端口同一时间只能跑一个服务（backbone / sglang / vllm-guard 端口相同）
+5. 间隔打分（`PGUARD_COPY_LOGITS_PROB` < 1）时输出 token 只有 1/N 出分数：`response_scores_max` 只统计被打分的 token，输出侧风险的流式中断最多晚 N-1 个 token；prompt 侧不受影响
+6. 多模态（图片）输入未列入验证范围
+7. 同一端口同一时间只能跑一个服务（backbone / sglang / vllm-guard 端口相同）
 
 ## 文档索引
 

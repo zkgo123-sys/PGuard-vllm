@@ -136,6 +136,11 @@ class Qwen3_5PGuardForConditionalGeneration(Qwen3_5ForConditionalGeneration):
         # all = every prefill token (enables prompt_series); last = each
         # request's final token only (official PGUARD_PREFILL_RISK_MODE=last)
         self._prefill_risk_mode = "all"
+        # live status for the streaming interrupt check (server side):
+        # {req_id: {head: {"plast": [...], "dmax": [...]}}}, rewritten to the
+        # store's small live file once per step for the requests it changed
+        self._live: dict[str, dict] = {}
+        self._live_dirty: set[str] = set()
 
     # -- setup -------------------------------------------------------------
     def load_weights(self, weights):
@@ -371,6 +376,10 @@ class Qwen3_5PGuardForConditionalGeneration(Qwen3_5ForConditionalGeneration):
                     self._gru_prefill(name, head, pos, prefill_rows)
                 if decode_rows:
                     self._gru_decode(name, head, pos, decode_rows, score=score)
+        for rid in self._live_dirty:
+            guard_store.write_live(rid, {h: {"plast": v["plast"], "dmax": v["dmax"]}
+                                         for h, v in self._live[rid].items()})
+        self._live_dirty.clear()
         self._evict_finished_states()
 
     def note_finished(self, req_ids) -> None:
@@ -381,6 +390,9 @@ class Qwen3_5PGuardForConditionalGeneration(Qwen3_5ForConditionalGeneration):
             return
         for rid in req_ids:
             self._prefill_done.discard(rid)
+            self._live.pop(rid, None)
+            self._live_dirty.discard(rid)
+            guard_store.close_live(rid)
         for head, pool in self._pools.items():
             for rid in req_ids:
                 if not pool.contains(rid):
@@ -400,6 +412,57 @@ class Qwen3_5PGuardForConditionalGeneration(Qwen3_5ForConditionalGeneration):
         # flat: task-major class-probability vector(s) for this step's n
         # tokens (CPU list, length n * total_cls; see state_pool/store)
         guard_store.append(head, req_id, flat, n, is_decode)
+        self._live_fold(head, req_id, flat, n, is_decode)
+
+    @staticmethod
+    def _top_risk(layout, blocks) -> float:
+        """Highest non-normal class probability over per-task class slices
+        (class 0 of every task is normal)."""
+        best = 0.0
+        for block in blocks:
+            if len(block) > 1:
+                best = max(best, max(block[1:]))
+        return best
+
+    def _live_fold(self, head: str, req_id: str, flat, n: int,
+                   is_decode: bool) -> None:
+        """Fold a scored step into the request's live status -- the same two
+        vectors as its final record (plast = last prompt token, dmax = running
+        max over scored output tokens), kept on the CPU copy the step already
+        produced. The store file is rewritten only when the request's top
+        non-normal probability rises: that is the only event that can turn a
+        streaming check into a hit, at any threshold."""
+        per_head = self._live.setdefault(req_id, {})
+        vec = per_head.get(head)
+        layout, _ = guard_store.task_layout(head)
+        if not is_decode:
+            # task i's block sits at [n*start, n*stop); its last token is
+            # the block's tail
+            plast = [v for task, start, stop in layout
+                     for v in flat[n * start + (n - 1) * (stop - start):
+                                          n * stop]]
+            top = self._top_risk(layout, [plast[s:e] for _, s, e in layout])
+            per_head[head] = {"plast": plast, "dmax": None,
+                              "top": top, "written": top}
+            self._live_dirty.add(req_id)
+            return
+        if vec is None:
+            vec = per_head[head] = {"plast": None, "dmax": None,
+                                    "top": -1.0, "written": -1.0}
+        top = vec["top"]
+        for t in range(n):
+            row = [flat[n * start + t * (stop - start) + k]
+                   for task, start, stop in layout
+                   for k in range(stop - start)]
+            cur = vec["dmax"]
+            vec["dmax"] = row if cur is None else [
+                a if a >= b else b for a, b in zip(cur, row)]
+            top = max(top, self._top_risk(
+                layout, [row[s:e] for _, s, e in layout]))
+        vec["top"] = top
+        if top > vec["written"]:      # a new high can only raise the verdict
+            vec["written"] = top
+            self._live_dirty.add(req_id)
 
     def _acc_update(self, head_name: str, req_ids: list[str], flats, ns,
                     is_decodes) -> None:
@@ -683,6 +746,7 @@ if __name__ == "__main__":
         m._capture_module_idx = [0, 1, 2]
         m._score_interval, m._decode_step, m._step_count = interval, 0, 0
         m._prefill_done, m._prefill_risk_mode = set(), "all"
+        m._live, m._live_dirty = {}, set()
         m.pguard_heads = {"lt": object(), "ema": object(), "gru": object()}
         m.pguard_cfgs = {k: types.SimpleNamespace(pguard_version=v) for k, v in
                          (("lt", "lasttok"), ("ema", "ema"), ("gru", "gru"))}
@@ -730,5 +794,30 @@ if __name__ == "__main__":
             bad.append("interval=10 arrive=%d" % arrive)
     for b in bad:
         print("FAIL", b)
-    print("model cadence self-test:", "FAILED (%d)" % len(bad) if bad else "ok")
+
+    # live status fold: plast = last prompt token, dmax = running max over
+    # scored output tokens, both in global class order like the final record;
+    # the store write happens only when the top non-normal probability rises
+    globals()["guard_store"] = types.SimpleNamespace(
+        task_layout=lambda head: ([("t_a", 0, 2), ("t_b", 2, 5)], 5),
+        append=lambda *a: None, close_live=lambda *a: None)
+    m = object.__new__(Qwen3_5PGuardForConditionalGeneration)
+    m._live, m._live_dirty = {}, set()
+    marks = []                      # store write needed after each step?
+    for flat, n, is_dec in [        # top non-normal: 0.3 | 0.3 | 0.4 | 0.3
+            ([0.9, 0.1, 0.8, 0.2, 0.7, 0.1, 0.2, 0.6, 0.3, 0.1], 2, False),
+            ([0.0, 0.3, 0.5, 0.2, 0.3], 1, True),
+            ([0.1, 0.2, 0.4, 0.4, 0.2], 1, True),
+            ([0.0, 0.1, 0.4, 0.3, 0.2], 1, True)]:
+        m._live_dirty.clear()
+        m._append_scores("ema", "r", flat, n, is_dec)
+        marks.append("r" in m._live_dirty)
+    st = m._live["r"]["ema"]
+    if (st["plast"], st["dmax"], st["top"], marks) != (
+            [0.8, 0.2, 0.6, 0.3, 0.1], [0.1, 0.3, 0.5, 0.4, 0.3], 0.4,
+            [True, False, True, False]):     # written only when the top rises
+        bad.append("live status fold")
+        print("FAIL live status fold:", st, "writes:", marks)
+    print("model self-test (cadence dispatch, live status):",
+          "FAILED (%d)" % len(bad) if bad else "ok")
     raise SystemExit(1 if bad else 0)
