@@ -93,10 +93,11 @@ vllm serve /path/to/Qwen3.5-9B-FP8-dynamic \
 
 | 版本 | 状态 |
 |---|---|
-| v0.25.1 | ✅ 已验证（eager + CUDA graph、三头、多模态） |
-| v0.26.0 | ✅ 已验证（pip 矩阵；需 `FLASHINFER_DISABLE_VERSION_CHECK=1`，compose 已内置） |
+| v0.25.1 | ✅ 已验证（eager + CUDA graph、三头、多模态；基线） |
+| v0.26.0 | ✅ 已验证（pip 矩阵 cu129 wheel；需 `FLASHINFER_DISABLE_VERSION_CHECK=1`，compose 已内置） |
+| v0.27.0+ | 🔄 验证中（torch 钉子 2.11.0→2.13.0，整栈换代后跑同一套验收） |
 | v0.34.0 | 设计期源码核对（runner/SchedulerOutput 字段一致） |
-| 其他 | 用 `vllm_compat` 自检 + smoke 验收后按需补候选 |
+| 其他 | 用 `vllm_compat` 自检 + smoke 验收后按需补候选；各版本验收记录见 `tests/versions/results/` |
 
 ## API 用法
 
