@@ -133,6 +133,7 @@ services:
       - ${HOST_BACKBONE_DIR:-./backbone/Qwen3.5-9B}:/models/backbone:ro
       - ./pg_weight:/pguard_heads:ro
       - ./pguard_vllm:/opt/pguard_vllm
+      - pguard-pip-cache:/root/.cache/pip
       - ./artifacts:/artifacts
     command: >
       -m pguard_vllm.server
@@ -156,3 +157,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 600s
+
+volumes:
+  pguard-pip-cache:
