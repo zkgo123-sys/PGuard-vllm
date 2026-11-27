@@ -8,7 +8,7 @@
 
 | 脚本 | 测什么 | 命令 |
 |---|---|---|
-| `pguard_smoke_test.sh` | 5 项判定冒烟：health、恶意/正常独立审查、正常/诱导对话（`guard_result`）。结果 JSON 存 `tests/artifacts/` | `bash tests/pguard_smoke_test.sh 13553` |
+| `pguard_smoke_test.sh` | 5 项判定用例：health、恶意/正常独立审查、正常/诱导对话（`guard_result`）。结果 JSON 存 `tests/artifacts/` | `bash tests/pguard_smoke_test.sh 13553` |
 | `pguard_interrupt_e2e.py` | 流式中断正确性：风险请求必须在**任何内容输出前**截断（零泄漏），良性请求不得误断 | `python3 tests/pguard_interrupt_e2e.py http://127.0.0.1:13553 10` |
 | `pguard_cadence_e2e.py` | 打分节奏：晚到请求的 prompt 分数保留、输出 token 按 cadence 打分不丢 | `python3 tests/pguard_cadence_e2e.py http://127.0.0.1:13553 16` |
 | `bench_guard.py` | 性能基准：8 并发吞吐 / TTFT / 单流速度（对照 README 性能表） | `python3 tests/bench_guard.py http://127.0.0.1:13553 8` |
@@ -30,7 +30,7 @@ docker exec pguard-vllm-guard python3 -m pguard_vllm.heads.ema           # ema �
 docker exec pguard-vllm-guard python3 -m pguard_vllm.heads.gru           # gru 头
 ```
 
-## 多版本矩阵
+## 多版本验收矩阵
 
 逐 vLLM 版本跑同一套验收：`tests/versions/`（版本清单在 `versions.py`，入口 `run_matrix.sh`，结果落 `tests/versions/results/`）。
 
