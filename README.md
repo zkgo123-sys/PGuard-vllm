@@ -87,7 +87,15 @@ vllm serve /path/to/Qwen3.5-9B-FP8-dynamic \
 
 - 换安全头：改 `PGUARD_HEADS` 指向对应 checkpoint 目录（支持 lasttok / ema / gru，可多头同开）
 - 换主干：`hidden_size` 与层数匹配即可；捕获层用 `PGUARD_CAPTURE_LAYERS` 覆盖
-- 换 vLLM 版本：`patch_runner.py` 已做**多候选兼容**——runner 类从候选列表解析（可用 `PGUARD_RUNNER_CANDIDATES="模块:类名,..."` 追加新版本路径），aux 来源按候选链逐步探测（拦截器暂存 → `execute_model_state` → `cudagraph_manager`）。升级版本时先跑 `tests/pguard_smoke_test.sh` 验收；0.25.1 已验证，其他版本按需补候选项
+- 换 vLLM 版本：`patch_runner.py` 已做**多候选兼容**——runner 类从候选列表解析（可用 `PGUARD_RUNNER_CANDIDATES="模块:类名,..."` 追加新版本路径），aux 来源按候选链逐步探测（拦截器暂存 → `execute_model_state` → `cudagraph_manager`）。升级流程：先在目标环境跑 `python3 -m pguard_vllm.vllm_compat` 自检（报告 runner/字段/版本），按提示补候选项，再走 `tests/README.md` 的验收流程
+
+**vLLM 版本支持**：
+
+| 版本 | 状态 |
+|---|---|
+| v0.25.1 | ✅ 已验证（eager + CUDA graph、三头、多模态） |
+| v0.34.0 | 设计期源码核对（runner/SchedulerOutput 字段一致） |
+| 其他 | 用 `vllm_compat` 自检 + smoke 验收后按需补候选 |
 
 ## API 用法
 

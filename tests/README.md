@@ -18,6 +18,7 @@
 覆盖补丁包各组件：配置解析、注册表、三种安全头、槽位池、分数存储、cadence 分发、流式中断聚合。
 
 ```bash
+docker exec pguard-vllm-guard python3 -m pguard_vllm.vllm_compat        # vLLM 版本兼容自检
 docker exec pguard-vllm-guard python3 -m pguard_vllm.pguard_config       # 环境变量解析
 docker exec pguard-vllm-guard python3 -m pguard_vllm.store               # 分数存储/聚合
 docker exec pguard-vllm-guard python3 -m pguard_vllm.state_pool          # 槽位池
@@ -33,6 +34,7 @@ docker exec pguard-vllm-guard python3 -m pguard_vllm.heads.gru           # gru �
 
 换 vLLM 版本、换主干或改动补丁代码后，按序执行，红一步停一步：
 
+0. 在目标环境的容器里跑 `python3 -m pguard_vllm.vllm_compat`——patch 依赖报告必须全绿（否则先补 `PGUARD_RUNNER_CANDIDATES` / `vllm_compat.py`）
 1. 模块级自测（上节，全绿）
 2. 起服务并等 healthy
 3. `pguard_smoke_test.sh` —— 判定结论必须与基线一致
