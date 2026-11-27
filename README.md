@@ -201,7 +201,7 @@ curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json
 | **优化后 + 单头 EMA + 每 10 步打分（推荐生产形态）** | CUDA graph | **497～506 tok/s** | **68.6～69.5 tok/s** | **0.05～0.11s** | **21.6 GB** |
 | 纯主干（无护栏，参考） | CUDA graph | 505 tok/s | 69.8 tok/s | 0.09s | 20.3 GB |
 
-显存为 `nvidia-smi` 对整卡实读（含 CUDA 上下文），`gpu_memory_utilization=0.90`；完整数据与读数见 `PGuard-实测记录.md` §3.6。
+显存为 `nvidia-smi` 对整卡实读（含 CUDA 上下文），`gpu_memory_utilization=0.90`；完整数据与读数见 `docs/PGuard-实测记录.md` §3.6。
 
 独立审查接口 `/v1/guard/score`：**～64ms** 热稳 / 77ms 首拍（HTTP 全程）。
 
@@ -226,7 +226,7 @@ API 进程：pop() O(1) 读 final → guard_result / 独立审查
 - 捕获层解析遵循官方语义：`PGUARD_CAPTURE_LAYERS` > `pguard_capture_layers` > `selected_layers` > `feature_layers`（20/24/28 层）
 - EMA prefill 折叠为闭式加权求和（O(1) kernel，非逐 token 循环）
 - 融合算子：分类头一次 grouped matmul、adapter 四算子、GRU 门 3 GEMM→2、gate 免 topk 快路径
-- 详见 `PGuard-Triton优化规划.md`（含剩余项执行清单）
+- 详见 `docs/PGuard-Triton优化规划.md`（含剩余项执行清单）
 
 ## 目录结构与测试
 
@@ -239,10 +239,10 @@ pguard_vllm/            补丁包（pyproject + 13 个模块）
   pguard_vllm/state_pool.py   槽位池（状态 + 分数聚合）
   pguard_vllm/store.py        /dev/shm 分数存储（flat + final 记录 + 实时状态）
   pguard_vllm/server.py       FastAPI（chat + guard/score + 中断）
-  DESIGN.md                   设计与 vLLM 内部事实
 docker-compose.yml      三 profile：vllm-guard（默认）/ backbone / sglang
+docker/                 Dockerfile.sglang / Dockerfile.vllm-guard
 tests/                  服务级验收脚本 + 模块自测指引（见 tests/README.md）
-PGuard-Triton优化规划.md  优化规划与执行清单（含实测数据）
+docs/                   中文文档与验收记录（调研/调用方案/实测/优化规划/DESIGN）
 ```
 
 自检与验收命令汇总见 [tests/README.md](tests/README.md)（含模块级自测与升级验收流程）。
@@ -259,8 +259,8 @@ PGuard-Triton优化规划.md  优化规划与执行清单（含实测数据）
 
 ## 文档索引
 
-- `PGuard-Triton优化规划.md` —— 优化规划、实测数据、剩余项执行清单
-- `PGuard-实测记录.md` —— 首轮实测记录（判定效果 / 性能 / 运维坑）
-- `PGuard-调用方案.md` —— API 调用方案
-- `PGuard-vLLM部署前期调研.md` —— 选型调研
-- `pguard_vllm/DESIGN.md` —— 补丁包设计（vLLM 内部事实清单）
+- `docs/PGuard-Triton优化规划.md` —— 优化规划、实测数据、剩余项执行清单
+- `docs/PGuard-实测记录.md` —— 首轮实测记录（判定效果 / 性能 / 运维坑）
+- `docs/PGuard-调用方案.md` —— API 调用方案
+- `docs/PGuard-vLLM部署前期调研.md` —— 选型调研
+- `docs/DESIGN.md` —— 补丁包设计（vLLM 内部事实清单）

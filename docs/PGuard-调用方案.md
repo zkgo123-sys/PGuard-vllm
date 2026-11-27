@@ -1,7 +1,7 @@
 # PGuard × vLLM 调用方案（混合模式 + 独立审查）
 
 > 适配对象：本机镜像 `vllm/vllm-openai:latest-cu129`（vLLM **0.25.1**，已核对补丁依赖的内部机制与 v0.34.0 一致）+ PGuard 安全头（Qwen3.5-9B 主干）
-> 补丁包：`pguard_vllm/`（设计见 `pguard_vllm/DESIGN.md`）
+> 补丁包：`pguard_vllm/`（设计见 `docs/DESIGN.md`）
 > 服务端口：`13553`（宿主机）→ 容器 8000；GPU：物理卡 5
 
 ---

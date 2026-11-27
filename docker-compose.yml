@@ -58,7 +58,7 @@ services:
     profiles: ["sglang"]
     build:
       context: .
-      dockerfile: Dockerfile.sglang
+      dockerfile: docker/Dockerfile.sglang
     image: pguard-sglang:latest
     container_name: pguard-sglang
     restart: unless-stopped
@@ -104,7 +104,7 @@ services:
 
   # ---------- 方案 3：vLLM + PGuard 安全头（本仓库补丁包，混合模式） ----------
   # chat 响应附带 guard_result；另有 POST /v1/guard/score 独立审查接口。
-  # 详见 pguard_vllm/DESIGN.md 与 docs 调用方案。
+  # 详见 docs/DESIGN.md 与 docs/ 调用方案。
   pguard-vllm-guard:
     profiles: ["vllm-guard"]
     image: ${VLLM_IMAGE:-vllm/vllm-openai:latest-cu129}   # 默认本机已有镜像；矩阵测试用 VLLM_IMAGE 覆盖
