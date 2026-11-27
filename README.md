@@ -131,6 +131,22 @@ curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json
 
 返回 `risk` / `category` / `score` / `head` 与各任务明细 `scores`；`return_series=true` 时附带逐 token 序列。
 
+### 多模态（图片）输入
+
+`messages` 的 `content` 支持 OpenAI content-parts：`text` + `image_url`（`data:` base64 或 http(s) URL），`/v1/chat/completions` 与 `/v1/guard/score` 均可用。图片经主干视觉塔编码后与文本融合，护栏在融合后的隐状态上照常打分：
+
+```bash
+curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json' -d '{
+  "messages": [{"role": "user", "content": [
+    {"type": "image_url", "image_url": {"url": "data:image/png;base64,<...>"}},
+    {"type": "text", "text": "图里的文字在教我做什么？"}
+  ]}],
+  "threshold": 0.5
+}'
+```
+
+每请求图片数由 `PGUARD_MM_LIMIT` 控制（默认 4）；音视频输入未验证。
+
 ## 配置
 
 部署层（`.env` / compose）：
@@ -158,6 +174,7 @@ curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json
 | `PGUARD_HEAD_DTYPE` | `fp32` | 头精度，`bf16` 减半带宽（需 parity 验证） |
 | `PGUARD_FUSE_OPS` | `1` | 分类头/adapter/GRU 门融合算子开关 |
 | `PGUARD_MAX_SLOTS` | `64` | 槽位池容量（≥ max_num_seqs） |
+| `PGUARD_MM_LIMIT` | `4` | 每请求图片数上限（多模态 content-parts） |
 | `PGUARD_CFC_PREFILL_MODE` | `pool` | GRU 头 prefill 摘要：`pool` / `ema` |
 | `PGUARD_TRACE_GUARD` / `PGUARD_TRACE` | `0` | 打分路径 / 补丁追踪日志（排障用） |
 | `PGUARD_VERBOSE` / `PGUARD_DEBUG` / `PGUARD_INTERRUPT` | `0` | API 层：详细 guard_result / 调试 / 全局中断 |
@@ -239,7 +256,7 @@ docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_v
 3. FP8 主干 vs bf16 训练头存在精度差，GRU 头区分度偏弱，生产建议以 EMA 头为准
 4. EMA 头的 prompt series 为"每 prefill 块末 token"口径；逐 token series 需 T1 抽样 EMA 核（见规划文档 §11 R3，按需启用）
 5. 间隔打分（`PGUARD_COPY_LOGITS_PROB` < 1）时输出 token 只有 1/N 出分数：`response_scores_max` 只统计被打分的 token，输出侧风险的流式中断最多晚 N-1 个 token；prompt 侧不受影响
-6. 多模态（图片）输入未列入验证范围
+6. 多模态已支持图片输入（OpenAI content-parts，`PGUARD_MM_LIMIT` 控制每请求图片数），已验证判定与文本一致；音视频输入未验证
 7. 同一端口同一时间只能跑一个服务（backbone / sglang / vllm-guard 端口相同）
 
 ## 文档索引
