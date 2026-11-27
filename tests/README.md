@@ -30,6 +30,15 @@ docker exec pguard-vllm-guard python3 -m pguard_vllm.heads.ema           # ema �
 docker exec pguard-vllm-guard python3 -m pguard_vllm.heads.gru           # gru 头
 ```
 
+## 多版本矩阵
+
+逐 vLLM 版本跑同一套验收：`tests/versions/`（版本清单在 `versions.py`，入口 `run_matrix.sh`，结果落 `tests/versions/results/`）。
+
+```bash
+bash tests/versions/run_matrix.sh              # 清单里全部版本
+PULL=1 bash tests/versions/run_matrix.sh 0.26.0   # 先 pull 再测指定版本
+```
+
 ## 升级 / 换型验收流程
 
 换 vLLM 版本、换主干或改动补丁代码后，按序执行，红一步停一步：

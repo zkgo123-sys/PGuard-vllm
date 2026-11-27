@@ -18,7 +18,7 @@ services:
   # ---------- 方案 1：vLLM 只跑主干（需显式 --profile backbone） ----------
   vllm-backbone:
     profiles: ["backbone"]
-    image: vllm/vllm-openai:latest-cu129   # 本机已有镜像（vLLM 0.25.1，含 qwen3_5）
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:latest-cu129}   # 默认本机已有镜像（vLLM 0.25.1，含 qwen3_5）；矩阵测试用 VLLM_IMAGE 覆盖
     container_name: pguard-vllm
     restart: unless-stopped
     ports:
@@ -107,7 +107,7 @@ services:
   # 详见 pguard_vllm/DESIGN.md 与 docs 调用方案。
   pguard-vllm-guard:
     profiles: ["vllm-guard"]
-    image: vllm/vllm-openai:latest-cu129   # 本机已有镜像，免构建免拉取
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:latest-cu129}   # 默认本机已有镜像；矩阵测试用 VLLM_IMAGE 覆盖
     entrypoint: python3                    # 镜像默认 entrypoint 是 vllm CLI，需覆盖
 
     container_name: pguard-vllm-guard

@@ -17,3 +17,6 @@ backbone/
 
 # upstream reference clone (has its own git history)
 pguard-src/
+
+# per-run raw logs are not tracked
+/tests/versions/results/*.log
