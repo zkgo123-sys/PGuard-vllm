@@ -121,6 +121,8 @@ services:
       - PGUARD_THRESHOLD=${PGUARD_THRESHOLD:-0.5}
       - PYTHONPATH=/opt/pguard_vllm
       - VLLM_ENABLE_V1_MULTIPROCESSING=0
+      # 矩阵测试 pip 换版本时 flashinfer 与 cubin 可能错位，导入期检查放行
+      - FLASHINFER_DISABLE_VERSION_CHECK=1
       - PGUARD_CFC_PREFILL_MODE=${PGUARD_CFC_PREFILL_MODE:-pool}
       - PGUARD_ENFORCE_EAGER=${PGUARD_ENFORCE_EAGER:-1}
       - PGUARD_CAPTURE_MODE=${PGUARD_CAPTURE_MODE:-hooks}
