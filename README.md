@@ -204,12 +204,13 @@ API 进程：pop() O(1) 读 final → guard_result / 独立审查
 ## 目录结构与测试
 
 ```
-pguard_vllm/            补丁包（pyproject + 9 个模块）
-  pguard_vllm/model.py        自定义架构：捕获 + 分段 + 三头打分
+pguard_vllm/            补丁包（pyproject + 13 个模块）
+  pguard_vllm/model.py        自定义架构：捕获 + 分段 + 头调度
   pguard_vllm/patch_runner.py execute_model/_model_forward 运行时补丁
+  pguard_vllm/heads/          三种安全头（lasttok/ema/gru）+ GuardHeadRegistry
+  pguard_vllm/pguard_config.py 全部 PGUARD_* 环境变量统一解析
   pguard_vllm/state_pool.py   槽位池（状态 + 分数聚合）
   pguard_vllm/store.py        /dev/shm 分数存储（flat + final 记录 + 实时状态）
-  pguard_vllm/head.py head_seq.py   三种安全头（含融合算子）
   pguard_vllm/server.py       FastAPI（chat + guard/score + 中断）
   DESIGN.md                   设计与 vLLM 内部事实
 docker-compose.yml      三 profile：vllm-guard（默认）/ backbone / sglang
@@ -225,9 +226,10 @@ PGuard-Triton优化规划.md  优化规划与执行清单（含实测数据）
 ```bash
 docker exec pguard-vllm-guard python3 -m pguard_vllm.store
 docker exec pguard-vllm-guard python3 -m pguard_vllm.state_pool
+docker exec pguard-vllm-guard python3 -m pguard_vllm.pguard_config       # 配置解析自检
 docker exec pguard-vllm-guard python3 -m pguard_vllm.model   # 间隔打分的分发自检
 docker exec pguard-vllm-guard python3 -m pguard_vllm.server --self-test   # 流式中断检查
-docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_vllm.head
+docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_vllm.heads
 ```
 
 ## 已知限制
