@@ -187,5 +187,5 @@ chat 请求还支持 `chat_template_kwargs`，会透传给 tokenizer 的 chat te
 docker compose --profile vllm-guard up -d
 docker logs -f pguard-vllm-guard   # 看到 "guard ready (heads=['ema','gru','lasttok'], ...)" 即三头挂载成功
 curl http://127.0.0.1:13553/health
-bash pguard_smoke_test.sh 13553    # 五项烟雾测试，结果存 artifacts/
+bash tests/pguard_smoke_test.sh 13553    # 五项烟雾测试，结果存 artifacts/
 ```

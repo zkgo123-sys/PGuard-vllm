@@ -94,7 +94,7 @@
 
 ### 2.6 优化后复测（11-26，最终图模式配置）
 
-`bash pguard_smoke_test.sh 13553` 5 项全过，判定与首测**完全一致**：
+`bash tests/pguard_smoke_test.sh 13553` 5 项全过，判定与首测**完全一致**：
 
 | 用例 | 首测（eager） | 修复后 eager（11-25） | 最终图模式（11-26） |
 |---|---|---|---|
@@ -112,7 +112,7 @@
 
 ## 3. 性能
 
-测试方法：`bench_guard.py`，8 条并发请求 × `max_tokens=256`（共 2048 completion tokens），非流式；另有 1 条 300 token 流式请求测 TTFT 与单流速度。单流速度按**生成的 token 数**计（每 token 一个流式 delta；已用 `stream_options.include_usage` 的 usage 核对，流式 chunk 数与 token 数一致）。所有配置都在**同一张 GPU 6** 上先后运行，唯一变量是护栏与执行模式。
+测试方法：`tests/bench_guard.py`，8 条并发请求 × `max_tokens=256`（共 2048 completion tokens），非流式；另有 1 条 300 token 流式请求测 TTFT 与单流速度。单流速度按**生成的 token 数**计（每 token 一个流式 delta；已用 `stream_options.include_usage` 的 usage 核对，流式 chunk 数与 token 数一致）。所有配置都在**同一张 GPU 6** 上先后运行，唯一变量是护栏与执行模式。
 
 ### 3.1 优化前基线（首测，原始记录）
 
@@ -193,7 +193,7 @@
 读数：
 
 - 间隔打分把护栏的每步开销从约 8 ms 压到约 1.2 ms，吞吐 +35%。剩下的 1.2 ms 是非打分步也要做的事（特征汇总、按请求分段、EMA / GRU 状态更新）。
-- 判定不变：`pguard_smoke_test.sh` 5 项全过，炸弹 0.929227、入侵 0.984743、良性 0.000231，与每步打分完全一致（这三个用例都是 prompt 侧命中）。
+- 判定不变：`tests/pguard_smoke_test.sh` 5 项全过，炸弹 0.929227、入侵 0.984743、良性 0.000231，与每步打分完全一致（这三个用例都是 prompt 侧命中）。
 - 端到端验证间隔语义：一条 900 token 的长请求在 535 token 时快照，已打分 55 个输出 token（10.3%）；16 个晚到的短请求（各 8 个输出 token）里，11 个至少有 1 个输出 token 被打分（理论期望约 12.8 个）。
 - 代价：输出 token 只有 1/10 出分数，`response_scores_max` 只统计被打分的 token；输出侧风险的流式中断最多晚 9 个 token 才发现。prompt 侧不受影响。
 - 和官方对齐的形态（**单头 EMA + 每 10 步打分**）也测了：497～506 tok/s，与纯主干参考值 505 持平（-1.6%～+0.2%，噪声内），独立审查 38～40 ms，流式中断与判定用例全过。这一轮在流式中断修复之后测的。官方的 0.8～2.3% 是 Qwen3.5-122B-A10B（TP=4，L20Z）上的数，模型、卡和负载都不同，但量级对上了。
@@ -237,10 +237,10 @@ cd /home/zk_data/SAG-main/vllm-code/PGuard
 #   PGUARD_ENFORCE_EAGER=0  PGUARD_CAPTURE_MODE=aux  VLLM_USE_V2_MODEL_RUNNER=1
 docker compose --profile vllm-guard up -d
 # 首次启动含 torch.compile + CUDA graph 捕获，约 5~8 分钟；之后有编译缓存会快一些
-bash pguard_smoke_test.sh 13553        # 5 项，结果 JSON 存 artifacts/
-python3 bench_guard.py http://127.0.0.1:13553 8
-python3 pguard_interrupt_e2e.py http://127.0.0.1:13553 10   # 流式中断：风险用例零泄漏
-python3 pguard_cadence_e2e.py http://127.0.0.1:13553 16     # 晚到请求保留 prompt 分数 + 打分比例
+bash tests/pguard_smoke_test.sh 13553        # 5 项，结果 JSON 存 artifacts/
+python3 tests/bench_guard.py http://127.0.0.1:13553 8
+python3 tests/pguard_interrupt_e2e.py http://127.0.0.1:13553 10   # 流式中断：风险用例零泄漏
+python3 tests/pguard_cadence_e2e.py http://127.0.0.1:13553 16     # 晚到请求保留 prompt 分数 + 打分比例
 
 # 回退到 eager（最稳配置）：把 PGUARD_ENFORCE_EAGER 改为 1、PGUARD_CAPTURE_MODE 改为 hooks 后重建
 
@@ -252,14 +252,14 @@ docker compose --profile vllm-guard up -d
 # 纯主干基线（同卡、同样 eager）：先停掉护栏容器释放 13553
 docker compose --profile vllm-guard down
 docker compose --profile backbone up -d
-python3 bench_guard.py http://127.0.0.1:13553 8
+python3 tests/bench_guard.py http://127.0.0.1:13553 8
 docker compose --profile backbone down
 ```
 
 识别效果复现：
 
 ```bash
-bash pguard_smoke_test.sh 13553        # 5 项，结果 JSON 存 artifacts/
+bash tests/pguard_smoke_test.sh 13553        # 5 项，结果 JSON 存 artifacts/
 
 # Lasttok 单头复查（修复验证）
 curl -s http://127.0.0.1:13553/v1/guard/score -H 'Content-Type: application/json' \

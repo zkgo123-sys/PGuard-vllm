@@ -30,11 +30,11 @@ curl http://127.0.0.1:13553/health
 验证：
 
 ```bash
-# 5 项判定用例（结果 JSON 存 artifacts/）
-bash pguard_smoke_test.sh 13553
+# 5 项判定用例（结果 JSON 存 tests/artifacts/）
+bash tests/pguard_smoke_test.sh 13553
 
 # 8 并发生成 + 打分基准
-python3 bench_guard.py http://127.0.0.1:13553 8
+python3 tests/bench_guard.py http://127.0.0.1:13553 8
 ```
 
 ## 补丁的打法与生效机制
@@ -87,7 +87,7 @@ vllm serve /path/to/Qwen3.5-9B-FP8-dynamic \
 
 - 换安全头：改 `PGUARD_HEADS` 指向对应 checkpoint 目录（支持 lasttok / ema / gru，可多头同开）
 - 换主干：`hidden_size` 与层数匹配即可；捕获层用 `PGUARD_CAPTURE_LAYERS` 覆盖
-- 换 vLLM 版本：`patch_runner.py` 已做**多候选兼容**——runner 类从候选列表解析（可用 `PGUARD_RUNNER_CANDIDATES="模块:类名,..."` 追加新版本路径），aux 来源按候选链逐步探测（拦截器暂存 → `execute_model_state` → `cudagraph_manager`）。升级版本时先跑 `pguard_smoke_test.sh` 验收；0.25.1 已验证，其他版本按需补候选项
+- 换 vLLM 版本：`patch_runner.py` 已做**多候选兼容**——runner 类从候选列表解析（可用 `PGUARD_RUNNER_CANDIDATES="模块:类名,..."` 追加新版本路径），aux 来源按候选链逐步探测（拦截器暂存 → `execute_model_state` → `cudagraph_manager`）。升级版本时先跑 `tests/pguard_smoke_test.sh` 验收；0.25.1 已验证，其他版本按需补候选项
 
 ## API 用法
 
@@ -231,23 +231,11 @@ pguard_vllm/            补丁包（pyproject + 13 个模块）
   pguard_vllm/server.py       FastAPI（chat + guard/score + 中断）
   DESIGN.md                   设计与 vLLM 内部事实
 docker-compose.yml      三 profile：vllm-guard（默认）/ backbone / sglang
-bench_guard.py          并发基准
-pguard_smoke_test.sh    5 项判定用例
-pguard_interrupt_e2e.py 流式中断端到端用例（风险用例零泄漏、良性不误中断）
-pguard_cadence_e2e.py   晚到请求保留 prompt 分数 + 打分比例的端到端用例
+tests/                  服务级验收脚本 + 模块自测指引（见 tests/README.md）
 PGuard-Triton优化规划.md  优化规划与执行清单（含实测数据）
 ```
 
-自检（容器内执行）：
-
-```bash
-docker exec pguard-vllm-guard python3 -m pguard_vllm.store
-docker exec pguard-vllm-guard python3 -m pguard_vllm.state_pool
-docker exec pguard-vllm-guard python3 -m pguard_vllm.pguard_config       # 配置解析自检
-docker exec pguard-vllm-guard python3 -m pguard_vllm.model   # 间隔打分的分发自检
-docker exec pguard-vllm-guard python3 -m pguard_vllm.server --self-test   # 流式中断检查
-docker exec -e PGUARD_PW_DIR=/pguard_heads pguard-vllm-guard python3 -m pguard_vllm.heads
-```
+自检与验收命令汇总见 [tests/README.md](tests/README.md)（含模块级自测与升级验收流程）。
 
 ## 已知限制
 

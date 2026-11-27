@@ -165,8 +165,8 @@ benchmark 形态：8 请求 × max_tokens=256，纯 decode 负载（256 步）�
 
 ## 8. 评测与验收
 
-- **正确性**：`pguard_smoke_test.sh` 5 项 + Lasttok 单头两组用例（炸弹命中、良性邮件不误报）+ `return_series=true` 的序列对齐检查；P2 每个内核与 torch 回退的 parity 断言进模块自测。
-- **性能协议**：`bench_guard.py`，并发 8/16/32，报 3 次中位数；单头 EMA 配置用于与官方 0.8%～2.3% 对齐比较；记录 TTFT 与单流速度。
+- **正确性**：`tests/pguard_smoke_test.sh` 5 项 + Lasttok 单头两组用例（炸弹命中、良性邮件不误报）+ `return_series=true` 的序列对齐检查；P2 每个内核与 torch 回退的 parity 断言进模块自测。
+- **性能协议**：`tests/bench_guard.py`，并发 8/16/32，报 3 次中位数；单头 EMA 配置用于与官方 0.8%～2.3% 对齐比较；记录 TTFT 与单流速度。
 - **目标**：单头 EMA 8 并发护栏开销 ≤5%（对齐官方量级）；三头全开 ≤15%；`PGUARD_COPY_LOGITS_PROB=0.1` 时三头 ≤5%。恢复 CUDA graph 后 8 并发总耗时目标 <7s（>300 tok/s）。
 - **实测对照（11-26）**：三头每步打分约 -33%（333～349 tok/s）；三头 + `0.1` 约 -8%（463～468 tok/s），没达到“三头 + 0.1 ≤5%”。与官方对齐的配置（单头 EMA + `0.1`）实测 **497～506 tok/s**，相对主干参考值 505 ≈0%（-1.6%～+0.2%，噪声内）。
 
