@@ -14,7 +14,8 @@
 | v0.26.0 | ✅ 已验证（pip 多版本矩阵；需 `FLASHINFER_DISABLE_VERSION_CHECK=1`，compose 已内置） |
 | v0.27.0 | ✅ 已验证（torch 2.11.0→2.13.0 整栈换代，cu129 全家桶 + torchvision 0.28.0+cu129） |
 | v0.28.0 | ✅ 已验证（pip 矩阵 cu129 wheel，torch 钉子不变 2.13.0） |
-| v0.29.0 ~ v0.32.0 | 🔄 适配中（cu129 wheel 变体可用） |
+| v0.29.0 | ✅ 已验证（pip 矩阵 cu129 wheel，torch 钉子不变 2.13.0） |
+| v0.30.0 ~ v0.32.0 | 🔄 适配中（cu129 wheel 变体可用） |
 | v0.33.0 / v0.34.0 | 🔄 适配中（仅 cu130 wheel，需镜像方式验证；v0.34.0 已完成设计期源码核对） |
 
 已验证版本的完整验收记录见 `tests/versions/results/`；新增版本的接入流程见 `tests/README.md`。
