@@ -27,6 +27,16 @@
 
 已验证版本的完整验收记录见 `tests/versions/results/`；新增版本的接入流程见 `tests/README.md`。
 
+**主干模型适配进度**（官方 PGuard 支持的主干）：
+
+| 主干模型 | 适配状态 |
+|---|---|
+| Qwen3.5 | ✅ 已验证（全功能：混合模式、独立审查、流式中断、多模态） |
+| DeepSeek-V4 | 🔄 适配中（官方实现为 SGLang 侧；vLLM 上游尚无该架构，跟踪中） |
+| GLM-4V-MoE | 🔄 适配中（官方实现为 SGLang 侧；vLLM 上游尚无该架构，跟踪中） |
+
+主干接入采用 `backbones/` 注册表（`BackboneRegistry` + `BackboneAdapter`，vLLM ModelRegistry 风格）：新增主干只需一个 adapter 文件（解码层访问、设备解析、aux 捕获三个接入点），架构类由工厂自动生成并注册。
+
 ## 功能特性
 
 - **三种安全头同时在线**：Lasttok（87 MB，无状态）、EMA（858 MB，多尺度 EMA 状态）、GRU（72 MB，CfC 递推），共享同一主干与捕获层
@@ -242,6 +252,7 @@ pguard_vllm/            补丁包（pyproject + 13 个模块）
   patch_runner.py         execute_model/_model_forward 运行时补丁
   vllm_compat.py          vLLM 版本兼容层（CompatProfile 注册表）
   heads/                  三种安全头（lasttok/ema/gru）+ GuardHeadRegistry
+  backbones/              主干适配注册表（BackboneRegistry + 各主干 adapter）
   pguard_config.py        PGUARD_* 环境变量统一解析
   state_pool.py           槽位池（状态 + 分数聚合）
   store.py                分数存储（flat + final 记录 + 实时状态）
