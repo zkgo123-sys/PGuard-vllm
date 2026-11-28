@@ -32,8 +32,8 @@
 | 主干模型 | 适配状态 |
 |---|---|
 | Qwen3.5 | ✅ 已验证（全功能：混合模式、独立审查、流式中断、多模态） |
-| DeepSeek-V4 | 🔄 适配中（官方实现为 SGLang 侧；vLLM 上游尚无该架构，跟踪中） |
-| GLM-4V-MoE | 🔄 适配中（官方实现为 SGLang 侧；vLLM 上游尚无该架构，跟踪中） |
+| DeepSeek-V4 | 🔄 适配中（vLLM 经 transformers 后端可加载，PGuard 接入需按 transformers 模型结构适配；官方 SGLang 实现已支持） |
+| GLM-4V-MoE | 🔄 适配中（同上；transformers 已含 glm4v_moe，vLLM 无原生实现） |
 
 主干接入采用 `backbones/` 注册表（`BackboneRegistry` + `BackboneAdapter`，vLLM ModelRegistry 风格）：新增主干只需一个 adapter 文件（解码层访问、设备解析、aux 捕获三个接入点），架构类由工厂自动生成并注册。
 
