@@ -10,6 +10,7 @@
 
 | vLLM 版本 | 适配状态 |
 |---|---|
+| v0.23.0 | ✅ 已验证（pip 矩阵 cu129 wheel，判定与基线一致） |
 | v0.24.0 | ✅ 已验证（pip 矩阵 cu129 wheel，判定与基线一致） |
 | v0.25.1 | ✅ 已验证（eager 与 CUDA graph、三头、多模态，验收基线） |
 | v0.26.0 | ✅ 已验证（pip 多版本矩阵；需 `FLASHINFER_DISABLE_VERSION_CHECK=1`，compose 已内置） |
