@@ -32,8 +32,8 @@
 | 主干模型 | 适配状态 |
 |---|---|
 | Qwen3.5 | ✅ 已验证（全功能：混合模式、独立审查、流式中断、多模态） |
-| DeepSeek-V4 | 🔄 适配中（vLLM 自 v0.31.0 原生支持，架构类 `DeepseekV4ForCausalLM`；adapter 待接入） |
-| GLM-4V-MoE | 🔄 适配中（vLLM 自 v0.31.0 原生支持，架构类 `Glm4vMoeForConditionalGeneration` 于 `glm4_1v.py`；adapter 待接入） |
+| DeepSeek-V4 | ✅ adapter 已接入（`backbones/deepseek_v4.py`，注册并服务回归通过）；tiny 启动验证待 transformers↔vLLM 的 DSv4 config 漂移对齐 |
+| GLM-4V-MoE | ✅ adapter 已接入（`backbones/glm4v_moe.py`，注册并服务回归通过）；tiny 启动验证待上游 config 漂移对齐 |
 
 主干接入采用 `backbones/` 注册表（`BackboneRegistry` + `BackboneAdapter`，vLLM ModelRegistry 风格）：新增主干只需一个 adapter 文件（解码层访问、设备解析、aux 捕获三个接入点），架构类由工厂自动生成并注册。
 
