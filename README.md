@@ -11,18 +11,18 @@
 | vLLM 版本 | 适配状态 |
 |---|---|
 | v0.20.0 及以下 | ❌ 不支持（vLLM 框架缺陷：Qwen3.5 混合注意力 kv_cache_spec 在 0.21.0 才纳入统一管理，引擎无法初始化，与补丁无关） |
-| v0.21.0 | ✅ 已验证（pip 矩阵 cu129 wheel，判定与基线一致） |
-| v0.22.0 | ✅ 已验证（pip 矩阵 cu129 wheel，判定与基线一致） |
-| v0.23.0 | ✅ 已验证（pip 矩阵 cu129 wheel，判定与基线一致） |
-| v0.24.0 | ✅ 已验证（pip 矩阵 cu129 wheel，判定与基线一致） |
-| v0.25.1 | ✅ 已验证（eager 与 CUDA graph、三头、多模态，验收基线） |
-| v0.26.0 | ✅ 已验证（pip 多版本矩阵；需 `FLASHINFER_DISABLE_VERSION_CHECK=1`，compose 已内置） |
-| v0.27.0 | ✅ 已验证（torch 2.11.0→2.13.0 整栈换代，cu129 全家桶 + torchvision 0.28.0+cu129） |
-| v0.28.0 | ✅ 已验证（pip 矩阵 cu129 wheel，torch 钉子不变 2.13.0） |
-| v0.29.0 | ✅ 已验证（pip 矩阵 cu129 wheel，torch 钉子不变 2.13.0） |
-| v0.30.0 | ✅ 已验证（pip 矩阵 cu129 wheel，torch 钉子不变 2.13.0） |
-| v0.31.0 | ✅ 已验证（pip 矩阵 cu129 wheel；torch 2.13.0、flashinfer 0.7.x 家族对齐） |
-| v0.32.0 | ✅ 已验证（pip 矩阵 cu129 wheel；torch 2.13.0、flashinfer 0.7.6 家族对齐） |
+| v0.21.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
+| v0.22.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
+| v0.23.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
+| v0.24.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
+| v0.25.1 | ✅ 已验证（验收基线：eager 与 CUDA graph、三头、多模态） |
+| v0.26.0 | ✅ 已验证，可正常启动并使用安全护栏推理（需 `FLASHINFER_DISABLE_VERSION_CHECK=1`，compose 已内置） |
+| v0.27.0 | ✅ 已验证，可正常启动并使用安全护栏推理（torch 整栈换代 2.13.0） |
+| v0.28.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
+| v0.29.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
+| v0.30.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
+| v0.31.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
+| v0.32.0 | ✅ 已验证，可正常启动并使用安全护栏推理 |
 | v0.33.0 / v0.34.0 | 🔄 适配中（仅 cu130 wheel，需镜像方式验证；v0.34.0 已完成设计期源码核对） |
 
 已验证版本的完整验收记录见 `tests/versions/results/`；新增版本的接入流程见 `tests/README.md`。
@@ -32,8 +32,8 @@
 | 主干模型 | 适配状态 |
 |---|---|
 | Qwen3.5 | ✅ 已验证（全功能：混合模式、独立审查、流式中断、多模态） |
-| DeepSeek-V4 | ✅ adapter 已接入（`backbones/deepseek_v4.py`，注册并服务回归通过）；tiny 启动验证待 transformers↔vLLM 的 DSv4 config 漂移对齐 |
-| GLM-4V-MoE | ✅ adapter 已接入（`backbones/glm4v_moe.py`，注册并服务回归通过）；tiny 启动验证待上游 config 漂移对齐 |
+| DeepSeek-V4 | 🔄 适配中（adapter 已接入并注册；启动验证待 transformers 与 vLLM 的配置格式对齐） |
+| GLM-4V-MoE | 🔄 适配中（adapter 已接入并注册；启动验证待上游配置格式对齐） |
 
 主干接入采用 `backbones/` 注册表（`BackboneRegistry` + `BackboneAdapter`，vLLM ModelRegistry 风格）：新增主干只需一个 adapter 文件（解码层访问、设备解析、aux 捕获三个接入点），架构类由工厂自动生成并注册。
 
