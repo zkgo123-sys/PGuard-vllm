@@ -120,6 +120,7 @@ services:
       - PGUARD_HEADS=${PGUARD_HEADS:-}
       - PGUARD_THRESHOLD=${PGUARD_THRESHOLD:-0.5}
       - PYTHONPATH=/opt/pguard_vllm
+      - PGUARD_BACKBONE=${PGUARD_BACKBONE:-qwen3_5}
       - VLLM_ENABLE_V1_MULTIPROCESSING=0
       # 矩阵测试 pip 换版本时 flashinfer 与 cubin 可能错位，导入期检查放行
       - FLASHINFER_DISABLE_VERSION_CHECK=1
@@ -137,9 +138,10 @@ services:
       - ./pguard_vllm:/opt/pguard_vllm
       - pguard-pip-cache:/root/.cache/pip
       - ./artifacts:/artifacts
+      - ./tiny-models:/models/tiny:ro
     command: >
       -m pguard_vllm.server
-      --model /models/backbone
+      --model ${PGUARD_MODEL:-/models/backbone}
       --served-model-name pguard-backbone
       --host 0.0.0.0 --port 8000
       --max-model-len ${MAX_MODEL_LEN:-8192}

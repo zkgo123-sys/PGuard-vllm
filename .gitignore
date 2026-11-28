@@ -20,3 +20,6 @@ pguard-src/
 
 # per-run raw logs are not tracked
 /tests/versions/results/*.log
+
+# tiny random checkpoints for boot-level backbone verification
+tiny-models/
